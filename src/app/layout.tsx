@@ -1,50 +1,43 @@
-import type { Metadata } from "next";
-import { Inter } from "next/font/google";
-import Link from "next/link";
-import "./globals.css";
-
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-inter",
-});
+import type { Metadata } from 'next'
+import './globals.css'
+import Link from 'next/link'
 
 export const metadata: Metadata = {
-  title: "Bán Lẹ",
-  description: "Marketplace application",
-};
+  title: 'Bán Lẹ - Rao vặt miễn phí',
+  description: 'Rao vặt miễn phí – Bán nhanh, mua lẹ!',
+}
 
 export default function RootLayout({
   children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+}: {
+  children: React.ReactNode
+}) {
   return (
     <html lang="vi">
-      <body className={`${inter.variable} font-sans antialiased`}>
-        <header className="sticky top-0 z-50 w-full bg-white border-b border-gray-200 shadow-sm">
-          <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center justify-between h-16 sm:h-20">
-              {/* Logo */}
-              <Link href="/" className="flex items-center">
-                <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900">
+      <body className="font-[system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif] antialiased">
+        <header className="bg-white shadow-sm sticky top-0 z-50">
+          <div className="max-w-7xl mx-auto px-4">
+            <div className="flex justify-between items-center h-16">
+              <Link href="/" className="flex items-center gap-2">
+                <span className="text-2xl">⚡</span>
+                <h1 className="text-2xl font-black bg-gradient-to-r from-green-500 to-green-600 bg-clip-text text-transparent">
                   Bán Lẹ
                 </h1>
               </Link>
-
-              {/* CTA Button */}
-              <div className="flex items-center">
-                <Link
-                  href="/post"
-                  className="px-4 py-2 sm:px-6 sm:py-2.5 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors duration-200 text-sm sm:text-base shadow-sm hover:shadow-md"
-                >
-                  + Đăng tin
-                </Link>
-              </div>
+              <Link
+                href="/post"
+                className="bg-green-500 text-white px-4 py-2 rounded-full font-medium hover:bg-green-600 transition-colors"
+              >
+                + Đăng tin
+              </Link>
             </div>
           </div>
         </header>
-        <main>{children}</main>
+        <main className="min-h-screen bg-gray-50">
+          {children}
+        </main>
       </body>
     </html>
-  );
+  )
 }
+

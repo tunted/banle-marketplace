@@ -1,281 +1,366 @@
-"use client";
+'use client'
 
-import { useState } from "react";
-import Link from "next/link";
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { supabase } from '@/lib/supabase'
+import Link from 'next/link'
+import Image from 'next/image'
+import { validatePhoneNumber, compressImage } from '@/lib/utils'
+import { checkRateLimit, recordPostAttempt, getRemainingTimeMinutes } from '@/lib/rateLimit'
+import { categories } from '@/lib/categories'
 
-export default function PostAdPage() {
+export default function PostPage() {
+  const router = useRouter()
+  const [loading, setLoading] = useState(false)
   const [formData, setFormData] = useState({
-    title: "",
-    price: "",
-    phone: "",
-    area: "",
-    description: "",
-    images: [] as File[],
-  });
+    title: '',
+    price: '',
+    phone: '',
+    location: '',
+    description: '',
+    category: '',
+  })
+  const [images, setImages] = useState<File[]>([])
+  const [imagePreviewUrls, setImagePreviewUrls] = useState<string[]>([])
+  const [rateLimitError, setRateLimitError] = useState<string | null>(null)
+  const [phoneError, setPhoneError] = useState<string | null>(null)
+
+  // Check rate limit on mount
+  useEffect(() => {
+    const rateLimit = checkRateLimit()
+    if (!rateLimit.allowed && rateLimit.remainingTime) {
+      const minutes = getRemainingTimeMinutes(rateLimit.remainingTime)
+      setRateLimitError(
+        `Bạn đã đăng quá nhiều tin trong 1 giờ. Vui lòng đợi ${minutes} phút nữa.`
+      )
+    }
+  }, [])
 
   const handleInputChange = (
-    e: React.ChangeEvent<
-      HTMLInputElement | HTMLTextAreaElement | HTMLInputElement
-    >
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
   ) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
-  };
+    const { name, value } = e.target
+    setFormData((prev) => ({ ...prev, [name]: value }))
+    
+    // Validate phone number in real-time
+    if (name === 'phone') {
+      if (value && !validatePhoneNumber(value)) {
+        setPhoneError('Số điện thoại không hợp lệ. Ví dụ: 0912345678 hoặc +84912345678')
+      } else {
+        setPhoneError(null)
+      }
+    }
+  }
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files) {
-      const selectedFiles = Array.from(files).slice(0, 5); // Max 5 images
-      setFormData((prev) => ({
-        ...prev,
-        images: selectedFiles,
-      }));
+    const files = Array.from(e.target.files || [])
+    if (files.length > 5) {
+      alert('Bạn chỉ có thể tải lên tối đa 5 hình ảnh')
+      return
     }
-  };
+    setImages(files)
+    
+    // Create preview URLs
+    const urls = files.map(file => URL.createObjectURL(file))
+    setImagePreviewUrls(urls)
+  }
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    // Handle form submission here
-    console.log("Form submitted:", formData);
-    // You can add API call or navigation here
-  };
+  const removeImage = (index: number) => {
+    const newImages = images.filter((_, i) => i !== index)
+    const newUrls = imagePreviewUrls.filter((_, i) => i !== index)
+    setImages(newImages)
+    setImagePreviewUrls(newUrls)
+    
+    // Revoke object URLs to free memory
+    URL.revokeObjectURL(imagePreviewUrls[index])
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+    setRateLimitError(null)
+
+    try {
+      // Check rate limit
+      const rateLimit = checkRateLimit()
+      if (!rateLimit.allowed) {
+        if (rateLimit.remainingTime) {
+          const minutes = getRemainingTimeMinutes(rateLimit.remainingTime)
+          setRateLimitError(
+            `Bạn đã đăng quá nhiều tin trong 1 giờ. Vui lòng đợi ${minutes} phút nữa.`
+          )
+        } else {
+          setRateLimitError('Bạn đã đăng quá nhiều tin trong 1 giờ. Vui lòng thử lại sau.')
+        }
+        setLoading(false)
+        return
+      }
+
+      // Validate required fields
+      if (!formData.title || !formData.price || !formData.phone || !formData.location) {
+        alert('Vui lòng điền đầy đủ các trường bắt buộc')
+        setLoading(false)
+        return
+      }
+
+      // Validate phone number
+      if (!validatePhoneNumber(formData.phone)) {
+        setPhoneError('Số điện thoại không hợp lệ. Ví dụ: 0912345678 hoặc +84912345678')
+        setLoading(false)
+        return
+      }
+
+      // Upload images to Supabase Storage
+      const imageUrls: string[] = []
+
+      for (let i = 0; i < images.length; i++) {
+        const originalFile = images[i]
+        
+        // Compress image before upload (reduces storage costs and improves load times)
+        let fileToUpload: Blob | File = originalFile
+        
+        try {
+          // Only compress if file is larger than 500KB
+          if (originalFile.size > 500 * 1024) {
+            const compressedBlob = await compressImage(originalFile, 1920, 1920, 0.85)
+            fileToUpload = new File([compressedBlob], originalFile.name, {
+              type: originalFile.type,
+              lastModified: originalFile.lastModified,
+            })
+          }
+        } catch (compressError) {
+          console.warn('Image compression failed, uploading original:', compressError)
+          // Fallback to original file if compression fails
+        }
+
+        const fileExt = originalFile.name.split('.').pop()
+        const fileName = `${Date.now()}-${i}-${Math.random().toString(36).substring(7)}.${fileExt}`
+
+        const { error: uploadError, data } = await supabase.storage
+          .from('listings')
+          .upload(fileName, fileToUpload)
+
+        if (uploadError) {
+          console.error('Upload error:', uploadError)
+          alert(`Lỗi khi tải lên hình ảnh: ${uploadError.message}`)
+          setLoading(false)
+          return
+        }
+
+        // Get public URL
+        const { data: urlData } = supabase.storage
+          .from('listings')
+          .getPublicUrl(data.path)
+
+        imageUrls.push(urlData.publicUrl)
+      }
+
+      // Insert listing into database
+      const { error: insertError } = await supabase.from('listings').insert({
+        title: formData.title,
+        price: parseFloat(formData.price),
+        phone: formData.phone,
+        location: formData.location,
+        description: formData.description || null,
+        images: imageUrls.length > 0 ? imageUrls : null,
+        category: formData.category || null,
+      })
+
+      if (insertError) {
+        console.error('Insert error:', insertError)
+        alert(`Lỗi khi tạo tin đăng: ${insertError.message}`)
+        setLoading(false)
+        return
+      }
+
+      // Record successful post for rate limiting
+      recordPostAttempt()
+
+      // Clean up preview URLs
+      imagePreviewUrls.forEach(url => URL.revokeObjectURL(url))
+
+      alert('Đăng tin thành công!')
+      router.push('/')
+    } catch (error) {
+      console.error('Error:', error)
+      alert('Đã xảy ra lỗi. Vui lòng thử lại.')
+      setLoading(false)
+    }
+  }
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8 sm:py-12">
-      <div className="container mx-auto px-4 sm:px-6 lg:px-8 max-w-3xl">
-        {/* Back Button */}
-        <Link
-          href="/"
-          className="inline-flex items-center text-gray-600 hover:text-gray-900 mb-6 transition-colors"
-        >
-          <svg
-            className="w-5 h-5 mr-2"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M10 19l-7-7m0 0l7-7m-7 7h18"
-            />
-          </svg>
-          <span className="font-medium">Quay lại trang chủ</span>
-        </Link>
+    <div className="max-w-2xl mx-auto px-4 py-8">
+      <Link
+        href="/"
+        className="text-green-500 hover:text-green-600 mb-4 inline-flex items-center gap-2"
+      >
+        <span>←</span>
+        <span>Quay lại</span>
+      </Link>
 
-        {/* Form Header */}
-        <div className="mb-8">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">
-            Đăng tin rao vặt miễn phí
-          </h1>
-          <p className="text-gray-600">
-            Điền thông tin bên dưới để đăng tin của bạn
-          </p>
-        </div>
+      <div className="bg-white rounded-2xl shadow-sm p-6">
+        <h1 className="text-2xl font-bold text-gray-900 mb-6">Đăng tin mới</h1>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 sm:p-8">
-          {/* Tiêu đề */}
-          <div className="mb-6">
-            <label
-              htmlFor="title"
-              className="block text-sm font-semibold text-gray-900 mb-2"
-            >
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {rateLimitError && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+              <p className="text-sm text-red-800">{rateLimitError}</p>
+            </div>
+          )}
+          
+          <div>
+            <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-2">
               Tiêu đề <span className="text-red-500">*</span>
             </label>
             <input
               type="text"
               id="title"
               name="title"
+              required
               value={formData.title}
               onChange={handleInputChange}
-              required
-              placeholder="Ví dụ: iPhone 15 Pro Max 256GB - Hàng chính hãng"
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition-colors"
+              className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent"
+              placeholder="Nhập tiêu đề tin đăng"
             />
           </div>
 
-          {/* Giá */}
-          <div className="mb-6">
-            <label
-              htmlFor="price"
-              className="block text-sm font-semibold text-gray-900 mb-2"
-            >
-              Giá <span className="text-red-500">*</span>
+          <div>
+            <label htmlFor="price" className="block text-sm font-medium text-gray-700 mb-2">
+              Giá (VND) <span className="text-red-500">*</span>
             </label>
-            <div className="relative">
-              <input
-                type="number"
-                id="price"
-                name="price"
-                value={formData.price}
-                onChange={handleInputChange}
-                required
-                min="0"
-                step="1000"
-                placeholder="0"
-                className="w-full px-4 py-3 pr-20 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition-colors"
-              />
-              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 font-medium">
-                VNĐ
-              </span>
-            </div>
-            <p className="mt-2 text-sm text-gray-500">
-              Nhập giá bán của sản phẩm/dịch vụ
-            </p>
+            <input
+              type="number"
+              id="price"
+              name="price"
+              required
+              min="0"
+              step="1000"
+              value={formData.price}
+              onChange={handleInputChange}
+              className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent"
+              placeholder="Nhập giá"
+            />
           </div>
 
-          {/* Số điện thoại */}
-          <div className="mb-6">
-            <label
-              htmlFor="phone"
-              className="block text-sm font-semibold text-gray-900 mb-2"
-            >
+          <div>
+            <label htmlFor="phone" className="block text-sm font-medium text-gray-700 mb-2">
               Số điện thoại <span className="text-red-500">*</span>
             </label>
             <input
               type="tel"
               id="phone"
               name="phone"
+              required
               value={formData.phone}
               onChange={handleInputChange}
-              required
-              placeholder="0901234567"
-              pattern="[0-9]{10,11}"
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition-colors"
+              className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent"
+              placeholder="Nhập số điện thoại (VD: 0912345678)"
             />
-            <p className="mt-2 text-sm text-gray-500">
-              Số điện thoại để người mua liên hệ
-            </p>
+            {phoneError && (
+              <p className="mt-1 text-sm text-red-600">{phoneError}</p>
+            )}
+            {!phoneError && formData.phone && (
+              <p className="mt-1 text-sm text-green-600">✓ Số điện thoại hợp lệ</p>
+            )}
           </div>
 
-          {/* Khu vực */}
-          <div className="mb-6">
-            <label
-              htmlFor="area"
-              className="block text-sm font-semibold text-gray-900 mb-2"
-            >
-              Khu vực <span className="text-red-500">*</span>
+          <div>
+            <label htmlFor="location" className="block text-sm font-medium text-gray-700 mb-2">
+              Địa điểm <span className="text-red-500">*</span>
             </label>
             <input
               type="text"
-              id="area"
-              name="area"
-              value={formData.area}
-              onChange={handleInputChange}
+              id="location"
+              name="location"
               required
-              placeholder="Ví dụ: Quận 1, TP.HCM"
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition-colors"
+              value={formData.location}
+              onChange={handleInputChange}
+              className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent"
+              placeholder="Nhập địa điểm"
             />
           </div>
 
-          {/* Mô tả */}
-          <div className="mb-6">
-            <label
-              htmlFor="description"
-              className="block text-sm font-semibold text-gray-900 mb-2"
+          <div>
+            <label htmlFor="category" className="block text-sm font-medium text-gray-700 mb-2">
+              Danh mục
+            </label>
+            <select
+              id="category"
+              name="category"
+              value={formData.category}
+              onChange={handleInputChange}
+              className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
             >
-              Mô tả chi tiết <span className="text-red-500">*</span>
+              <option value="">Chọn danh mục</option>
+              {categories.map((cat) => (
+                <option key={cat.id} value={cat.slug}>
+                  {cat.icon} {cat.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-2">
+              Mô tả
             </label>
             <textarea
               id="description"
               name="description"
+              rows={6}
               value={formData.description}
               onChange={handleInputChange}
-              required
-              rows={6}
-              placeholder="Mô tả chi tiết về sản phẩm/dịch vụ của bạn..."
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition-colors resize-y"
+              className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none"
+              placeholder="Nhập mô tả chi tiết"
             />
-            <p className="mt-2 text-sm text-gray-500">
-              Cung cấp thông tin chi tiết để tăng cơ hội bán được nhanh hơn
-            </p>
           </div>
 
-          {/* Upload ảnh */}
-          <div className="mb-8">
-            <label
-              htmlFor="images"
-              className="block text-sm font-semibold text-gray-900 mb-2"
-            >
-              Hình ảnh
+          <div>
+            <label htmlFor="images" className="block text-sm font-medium text-gray-700 mb-2">
+              Hình ảnh (Tối đa 5 ảnh)
             </label>
-            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 sm:p-8 text-center hover:border-green-400 transition-colors">
-              <input
-                type="file"
-                id="images"
-                name="images"
-                accept="image/*"
-                multiple
-                onChange={handleImageChange}
-                className="hidden"
-              />
-              <label
-                htmlFor="images"
-                className="cursor-pointer flex flex-col items-center"
-              >
-                <svg
-                  className="w-12 h-12 text-gray-400 mb-3"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
-                  />
-                </svg>
-                <span className="text-sm font-medium text-gray-700 mb-1">
-                  Chọn tối đa 5 ảnh
-                </span>
-                <span className="text-xs text-gray-500">
-                  PNG, JPG hoặc WEBP (tối đa 5MB mỗi ảnh)
-                </span>
-              </label>
-            </div>
-            {formData.images.length > 0 && (
-              <div className="mt-4">
-                <p className="text-sm text-gray-600 mb-2">
-                  Đã chọn {formData.images.length} ảnh:
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {formData.images.map((file, index) => (
-                    <div
-                      key={index}
-                      className="px-3 py-1 bg-gray-100 rounded-md text-sm text-gray-700"
+            <input
+              type="file"
+              id="images"
+              name="images"
+              accept="image/*"
+              multiple
+              onChange={handleImageChange}
+              className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-500 file:text-white hover:file:bg-green-600"
+            />
+            {imagePreviewUrls.length > 0 && (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {imagePreviewUrls.map((url, index) => (
+                  <div key={index} className="relative w-16 h-16 rounded-lg overflow-hidden border border-gray-300">
+                    <Image
+                      src={url}
+                      alt={`Preview ${index + 1}`}
+                      fill
+                      className="object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeImage(index)}
+                      className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs hover:bg-red-600"
                     >
-                      {file.name}
-                    </div>
-                  ))}
-                </div>
+                      ×
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
           </div>
 
-          {/* Submit Button */}
-          <div className="flex flex-col sm:flex-row gap-4 sm:justify-end">
-            <Link
-              href="/"
-              className="px-6 py-3 border border-gray-300 rounded-lg text-gray-700 font-semibold hover:bg-gray-50 transition-colors text-center"
-            >
-              Hủy
-            </Link>
-            <button
-              type="submit"
-              className="px-8 py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors duration-200 shadow-sm hover:shadow-md"
-            >
-              Đăng tin miễn phí
-            </button>
-          </div>
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-gradient-to-r from-green-500 to-green-600 text-white py-3.5 rounded-xl font-bold disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-md transition-shadow"
+          >
+            {loading ? 'Đang đăng tin...' : 'Đăng tin'}
+          </button>
         </form>
       </div>
     </div>
-  );
+  )
 }
 
