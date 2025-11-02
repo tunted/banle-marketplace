@@ -30,9 +30,6 @@ export default function CategoryCarousel({ selectedCategory = '', onCategorySele
           console.error('Error details:', JSON.stringify(error, null, 2))
           setCategories([])
         } else {
-          console.log('Fetched categories:', data?.length || 0, 'items')
-          console.log('Categories data:', data)
-          
           // Sort categories: first by sort_order (nulls last), then by name
           const sortedCategories = (data || []).sort((a, b) => {
             // If both have sort_order, sort by it
@@ -139,12 +136,6 @@ export default function CategoryCarousel({ selectedCategory = '', onCategorySele
 
   return (
     <div className="mb-8 relative">
-      {/* Debug info - remove in production */}
-      {process.env.NODE_ENV === 'development' && (
-        <div className="mb-2 text-xs text-gray-500 bg-blue-50 p-2 rounded">
-          Hiển thị {categories.length} danh mục (tổng {categories.length} items được fetch)
-        </div>
-      )}
       <div className="relative">
         {/* Scroll Container */}
         <div
@@ -161,20 +152,19 @@ export default function CategoryCarousel({ selectedCategory = '', onCategorySele
         >
           {categories.map((category, index) => {
             const isSelected = selectedCategory === category.slug
-            // Debug: log each category being rendered
-            if (process.env.NODE_ENV === 'development') {
-              console.log(`Rendering category ${index + 1}:`, category.name, 'image_url:', category.image_url ? 'has image' : 'no image')
-            }
             return (
               <button
                 key={category.id || `category-${index}`}
                 onClick={() => onCategorySelect?.(isSelected ? '' : category.slug)}
-                className={`flex-shrink-0 w-[calc((25%-0.5rem)/2)] sm:w-[calc((25%-1.5rem)/4)] aspect-[3/2] relative rounded-lg overflow-hidden shadow-md hover:shadow-lg transition-all duration-300 group ${
-                  isSelected ? 'ring-2 ring-green-500 ring-offset-1' : ''
+                className={`flex-shrink-0 w-[calc((25%-0.5rem)/2)] sm:w-[calc((25%-1.5rem)/4)] aspect-[3/2] relative rounded-xl overflow-hidden transition-all duration-300 group card-3d ${
+                  isSelected ? 'ring-2 ring-green-500 ring-offset-2' : ''
                 }`}
                 style={{ 
                   minWidth: 'calc((25% - 0.5rem) / 2)', 
-                  flexShrink: 0
+                  flexShrink: 0,
+                  boxShadow: isSelected 
+                    ? '0 10px 30px -5px rgba(34, 197, 94, 0.4), 0 4px 15px -5px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.2)'
+                    : '0 4px 15px -5px rgba(0, 0, 0, 0.15), 0 2px 8px -5px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.2)',
                 }}
               >
               {/* Background Image or Fallback */}

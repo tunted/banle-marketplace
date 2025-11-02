@@ -268,10 +268,16 @@ export default function HomePage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50">
       <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* Search Bar - Sticky Top */}
-        <div className="sticky top-16 z-40 bg-white rounded-2xl shadow-md p-4 mb-8 -mt-4">
+        {/* Search Bar - Sticky Top with 3D Effect */}
+        <div 
+          className="sticky top-20 z-40 bg-white/90 backdrop-blur-sm rounded-2xl p-4 mb-8 -mt-4 transition-all duration-300"
+          style={{
+            boxShadow: '0 10px 40px rgba(0, 0, 0, 0.1), 0 2px 8px rgba(0, 0, 0, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
+            transform: 'perspective(1000px) rotateX(1deg)',
+          }}
+        >
           <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-4">
             {/* Category Dropdown */}
             <div className="flex-shrink-0">
@@ -325,10 +331,14 @@ export default function HomePage() {
             </button>
           </div>
 
-          {/* Search Button */}
+          {/* Search Button with 3D Effect */}
           <button
             type="submit"
-            className="w-full sm:w-auto px-6 py-3 bg-yellow-400 text-gray-900 font-semibold rounded-xl hover:bg-yellow-500 transition-colors flex-shrink-0"
+            className="w-full sm:w-auto px-6 py-3 bg-gradient-to-r from-yellow-400 to-yellow-500 text-gray-900 font-bold rounded-xl hover:from-yellow-500 hover:to-yellow-600 transition-all duration-200 flex-shrink-0 transform hover:scale-105 active:scale-95"
+            style={{
+              boxShadow: '0 4px 14px 0 rgba(234, 179, 8, 0.39), inset 0 -2px 0 rgba(0, 0, 0, 0.1)',
+              textShadow: '0 1px 2px rgba(255, 255, 255, 0.8)',
+            }}
           >
             Tìm kiếm
           </button>
@@ -393,7 +403,10 @@ export default function HomePage() {
               <Link
                 key={listing.id}
                 href={`/listing/${listing.id}`}
-                className="bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow"
+                className="bg-white rounded-2xl overflow-hidden transition-all duration-300 transform hover:scale-[1.02] hover:-translate-y-1"
+                style={{
+                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
+                }}
               >
                 <div className="aspect-[4/3] relative bg-gray-100 flex items-center justify-center">
                   {firstImage ? (
