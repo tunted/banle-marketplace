@@ -27,6 +27,12 @@ export default function ProfilePage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
 
+  // Edit mode state
+  const [isEditing, setIsEditing] = useState(false)
+  const [editingFullName, setEditingFullName] = useState<string>('')
+  const [editingPhone, setEditingPhone] = useState<string>('')
+  const [saving, setSaving] = useState(false)
+
   useEffect(() => {
     async function loadProfile() {
       try {
@@ -94,6 +100,8 @@ export default function ProfilePage() {
               }
 
               setProfile(newProfile)
+              setEditingFullName(newProfile.full_name || '')
+              setEditingPhone(newProfile.phone || '')
               setLoadingState('success')
             } catch (createErr: any) {
               console.error('Error creating profile:', createErr)
@@ -108,6 +116,8 @@ export default function ProfilePage() {
         } else if (data) {
           // Success - profile found
           setProfile(data)
+          setEditingFullName(data.full_name || '')
+          setEditingPhone(data.phone || '')
           setLoadingState('success')
         }
       } catch (err: any) {
@@ -304,6 +314,72 @@ export default function ProfilePage() {
     }
   }
 
+  async function handleSaveProfile() {
+    if (!profile) return
+
+    setSaving(true)
+    setError(null)
+    setSuccess(null)
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      
+      if (!session?.user) {
+        setError('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.')
+        setSaving(false)
+        return
+      }
+
+      // Update profile in database
+      const { error: updateError } = await supabase
+        .from('user_profiles')
+        .update({
+          full_name: editingFullName.trim() || null,
+          phone: editingPhone.trim() || null,
+        })
+        .eq('id', session.user.id)
+
+      if (updateError) {
+        console.error('Update error:', updateError)
+        let errorMsg = 'Không thể cập nhật thông tin. Vui lòng thử lại.'
+        if (updateError.message?.includes('permission') || updateError.message?.includes('RLS')) {
+          errorMsg = 'Bạn không có quyền cập nhật hồ sơ. Vui lòng liên hệ quản trị viên.'
+        }
+        setError(errorMsg)
+        setTimeout(() => setError(null), 5000)
+        setSaving(false)
+        return
+      }
+
+      // Update local state
+      setProfile(prev => prev ? {
+        ...prev,
+        full_name: editingFullName.trim() || null,
+        phone: editingPhone.trim() || null,
+      } : null)
+
+      setSuccess('Thông tin đã được cập nhật thành công!')
+      setIsEditing(false)
+      router.refresh()
+      setTimeout(() => setSuccess(null), 4000)
+    } catch (err: any) {
+      console.error('Error saving profile:', err)
+      setError('Đã xảy ra lỗi khi lưu thông tin. Vui lòng thử lại.')
+      setTimeout(() => setError(null), 5000)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function handleCancelEdit() {
+    if (profile) {
+      setEditingFullName(profile.full_name || '')
+      setEditingPhone(profile.phone || '')
+    }
+    setIsEditing(false)
+    setError(null)
+  }
+
   // Loading state
   if (loadingState === 'loading') {
     return (
@@ -438,35 +514,105 @@ export default function ProfilePage() {
 
             {/* Profile Information */}
             <div className="space-y-4">
+              {/* Full Name Field */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Họ và tên
                 </label>
-                <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
-                  <p className="text-gray-900 font-medium">
-                    {profile.full_name || 'Người dùng'}
-                  </p>
-                </div>
+                {isEditing ? (
+                  <input
+                    type="text"
+                    value={editingFullName}
+                    onChange={(e) => setEditingFullName(e.target.value)}
+                    placeholder="Nhập họ và tên"
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all"
+                    disabled={saving}
+                  />
+                ) : (
+                  <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                    <p className="text-gray-900 font-medium">
+                      {profile.full_name || 'Chưa cập nhật'}
+                    </p>
+                  </div>
+                )}
               </div>
 
+              {/* Email Field - Read Only */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Email
                 </label>
                 <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
                   <p className="text-gray-900">{email || 'Chưa có email'}</p>
+                  <p className="text-xs text-gray-500 mt-1">Email không thể thay đổi</p>
                 </div>
               </div>
 
+              {/* Phone Field */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Số điện thoại
                 </label>
-                <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
-                  <p className="text-gray-900">
-                    {profile.phone || 'Chưa cập nhật'}
-                  </p>
-                </div>
+                {isEditing ? (
+                  <input
+                    type="tel"
+                    value={editingPhone}
+                    onChange={(e) => setEditingPhone(e.target.value)}
+                    placeholder="Nhập số điện thoại (ví dụ: 0901234567)"
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all"
+                    disabled={saving}
+                  />
+                ) : (
+                  <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                    <p className="text-gray-900">
+                      {profile.phone || 'Chưa cập nhật'}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="pt-4">
+                {isEditing ? (
+                  <div className="flex gap-3">
+                    <button
+                      onClick={handleSaveProfile}
+                      disabled={saving}
+                      className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 text-white font-semibold py-3 px-4 rounded-xl hover:from-green-600 hover:to-emerald-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg"
+                    >
+                      {saving ? (
+                        <span className="flex items-center justify-center gap-2">
+                          <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></span>
+                          Đang lưu...
+                        </span>
+                      ) : (
+                        <span className="flex items-center justify-center gap-2">
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                          Lưu thay đổi
+                        </span>
+                      )}
+                    </button>
+                    <button
+                      onClick={handleCancelEdit}
+                      disabled={saving}
+                      className="px-4 py-3 bg-gray-100 text-gray-700 font-semibold rounded-xl hover:bg-gray-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Hủy
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setIsEditing(true)}
+                    className="w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white font-semibold py-3 px-4 rounded-xl hover:from-green-600 hover:to-emerald-700 transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                    Chỉnh sửa thông tin
+                  </button>
+                )}
               </div>
             </div>
 

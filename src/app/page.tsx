@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 import Image from 'next/image'
 import { formatCurrency, getTimeAgo, isNewListing } from '@/lib/utils'
-import { categories, type Category } from '@/lib/categories'
+import CategoryCarousel from '@/components/CategoryCarousel'
 
 interface Province {
   code: string
@@ -66,6 +66,8 @@ export default function HomePage() {
   const [locationName, setLocationName] = useState<string>('Chọn khu vực')
   const [searchQuery, setSearchQuery] = useState<string>('')
   const [isLocationModalOpen, setIsLocationModalOpen] = useState(false)
+  const [categories, setCategories] = useState<Array<{ id: string; name: string; slug: string; sort_order: number | null }>>([])
+  const [loadingCategories, setLoadingCategories] = useState(true)
   
   // Location modal state
   const [provinces, setProvinces] = useState<Province[]>([])
@@ -76,6 +78,33 @@ export default function HomePage() {
   const [loadingWards, setLoadingWards] = useState(false)
   const [locationError, setLocationError] = useState<string | null>(null)
   const modalRef = useRef<HTMLDivElement>(null)
+
+  // Load categories from database
+  useEffect(() => {
+    async function loadCategories() {
+      setLoadingCategories(true)
+      try {
+        const { data, error } = await supabase
+          .from('categories')
+          .select('id, name, slug, sort_order')
+          .order('sort_order', { ascending: true, nullsFirst: false })
+          .order('name', { ascending: true })
+
+        if (error) {
+          console.error('Error fetching categories:', error)
+          setCategories([])
+        } else {
+          setCategories(data || [])
+        }
+      } catch (err) {
+        console.error('Error loading categories:', err)
+        setCategories([])
+      } finally {
+        setLoadingCategories(false)
+      }
+    }
+    loadCategories()
+  }, [])
 
   useEffect(() => {
     async function loadListings() {
@@ -239,25 +268,27 @@ export default function HomePage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8">
-      {/* Search Bar - Sticky Top */}
-      <div className="sticky top-16 z-40 bg-white rounded-2xl shadow-md p-4 mb-6 -mt-4">
-        <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-4">
-          {/* Category Dropdown */}
-          <div className="flex-shrink-0">
-            <select
-              value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value)}
-              className="w-full sm:w-48 p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
-            >
-              <option value="">Danh mục</option>
-              {categories.map((cat) => (
-                <option key={cat.id} value={cat.slug}>
-                  {cat.name}
-                </option>
-              ))}
-            </select>
-          </div>
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-7xl mx-auto px-4 py-8">
+        {/* Search Bar - Sticky Top */}
+        <div className="sticky top-16 z-40 bg-white rounded-2xl shadow-md p-4 mb-8 -mt-4">
+          <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-4">
+            {/* Category Dropdown */}
+            <div className="flex-shrink-0">
+              <select
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                className="w-full sm:w-48 p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
+                disabled={loadingCategories}
+              >
+                <option value="">Danh mục</option>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.slug}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+            </div>
 
           {/* Search Input */}
           <div className="flex-1 relative">
@@ -302,31 +333,15 @@ export default function HomePage() {
             Tìm kiếm
           </button>
         </form>
-      </div>
-
-      {/* Category Grid */}
-      <div className="mb-8">
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-4">
-          {categories.map((category) => (
-            <button
-              key={category.id}
-              onClick={() => setSelectedCategory(selectedCategory === category.slug ? '' : category.slug)}
-              className={`flex flex-col items-center justify-center p-4 rounded-xl transition-all hover:scale-105 hover:shadow-md ${
-                selectedCategory === category.slug
-                  ? 'bg-green-50 shadow-md'
-                  : 'bg-white shadow-sm'
-              }`}
-            >
-              <span className="text-3xl mb-2">{category.icon}</span>
-              <span className="text-xs font-medium text-gray-700 text-center">
-                {category.name}
-              </span>
-            </button>
-          ))}
         </div>
-      </div>
 
-      {/* Listings Grid */}
+        {/* Dynamic Category Carousel */}
+        <CategoryCarousel
+          selectedCategory={selectedCategory}
+          onCategorySelect={setSelectedCategory}
+        />
+
+        {/* Listings Grid */}
       {loading ? (
         <div className="text-center py-16">
           <p className="text-gray-500">Đang tải...</p>
@@ -440,7 +455,7 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Location Filter Modal */}
+        {/* Location Filter Modal */}
       {isLocationModalOpen && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-50 p-4">
           <div
@@ -546,6 +561,7 @@ export default function HomePage() {
           </div>
         </div>
       )}
+      </div>
     </div>
   )
 }
