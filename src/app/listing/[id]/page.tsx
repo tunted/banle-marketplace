@@ -59,7 +59,36 @@ export default async function ListingDetailPage({
     notFound()
   }
 
-  const images = listing.images || []
+  // Parse images array - handle both array and string formats
+  let imagesArray: string[] = []
+  if (listing.images) {
+    if (Array.isArray(listing.images)) {
+      imagesArray = listing.images
+    } else if (typeof listing.images === 'string') {
+      try {
+        // Try to parse as JSON string
+        const parsed = JSON.parse(listing.images)
+        if (Array.isArray(parsed)) {
+          imagesArray = parsed
+        }
+      } catch {
+        // If not valid JSON, ignore
+        imagesArray = []
+      }
+    }
+  }
+
+  // Filter to only valid image URLs
+  const validImages = imagesArray.filter((img) => {
+    if (!img || typeof img !== 'string') return false
+    // Must be a valid absolute URL (http/https) or relative path starting with /
+    return (
+      img.startsWith('http://') ||
+      img.startsWith('https://') ||
+      img.startsWith('/')
+    )
+  })
+
   const isNew = isNewListing(listing.created_at)
 
   return (
@@ -74,9 +103,9 @@ export default async function ListingDetailPage({
         </Link>
 
         <div className="bg-white rounded-2xl overflow-hidden shadow-sm">
-          {images.length > 0 ? (
+          {validImages.length > 0 ? (
             <div className="space-y-4 mb-4">
-              {images.map((image, index) => (
+              {validImages.map((image, index) => (
                 <div key={index} className="aspect-[4/3] relative bg-gray-100">
                   <Image
                     src={image}

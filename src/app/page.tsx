@@ -342,9 +342,36 @@ export default function HomePage() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredListings.map((listing) => {
-            const firstImage = listing.images && listing.images.length > 0 
-              ? listing.images[0] 
-              : null
+            // Parse images array - handle both array and string formats
+            let imagesArray: string[] = []
+            if (listing.images) {
+              if (Array.isArray(listing.images)) {
+                imagesArray = listing.images
+              } else if (typeof listing.images === 'string') {
+                try {
+                  // Try to parse as JSON string
+                  const parsed = JSON.parse(listing.images)
+                  if (Array.isArray(parsed)) {
+                    imagesArray = parsed
+                  }
+                } catch {
+                  // If not valid JSON, ignore
+                  imagesArray = []
+                }
+              }
+            }
+
+            // Get first valid image URL
+            const firstImage = imagesArray.find((img) => {
+              if (!img || typeof img !== 'string') return false
+              // Must be a valid absolute URL (http/https) or relative path starting with /
+              return (
+                img.startsWith('http://') ||
+                img.startsWith('https://') ||
+                img.startsWith('/')
+              )
+            }) || null
+
             const isNew = isNewListing(listing.created_at)
 
             return (
@@ -362,6 +389,11 @@ export default function HomePage() {
                       className="object-cover"
                       sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
                       loading="lazy"
+                      onError={(e) => {
+                        // Hide image on error and show placeholder
+                        const target = e.target as HTMLImageElement
+                        target.style.display = 'none'
+                      }}
                     />
                   ) : (
                     <svg

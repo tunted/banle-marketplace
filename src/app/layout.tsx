@@ -1,17 +1,37 @@
 import type { Metadata } from 'next'
 import './globals.css'
 import Link from 'next/link'
+import { createClient } from '@/lib/supabase-server'
+import UserMenu from '@/components/UserMenu'
 
 export const metadata: Metadata = {
   title: 'Bán Lẹ - Rao vặt miễn phí',
   description: 'Rao vặt miễn phí – Bán nhanh, mua lẹ!',
 }
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
+  const supabase = await createClient()
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+
+  let userProfile = null
+  if (session?.user) {
+    const { data } = await supabase
+      .from('user_profiles')
+      .select('id, full_name, avatar_url')
+      .eq('id', session.user.id)
+      .single()
+    
+    if (data) {
+      userProfile = data
+    }
+  }
+
   return (
     <html lang="vi">
       <body className="font-[system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif] antialiased">
@@ -24,12 +44,15 @@ export default function RootLayout({
                   Bán Lẹ
                 </h1>
               </Link>
-              <Link
-                href="/post"
-                className="bg-green-500 text-white px-4 py-2 rounded-full font-medium hover:bg-green-600 transition-colors"
-              >
-                + Đăng tin
-              </Link>
+              <div className="flex items-center gap-4">
+                <Link
+                  href="/post"
+                  className="bg-green-500 text-white px-4 py-2 rounded-full font-medium hover:bg-green-600 transition-colors"
+                >
+                  + Đăng tin
+                </Link>
+                <UserMenu user={userProfile} initialSession={!!session} />
+              </div>
             </div>
           </div>
         </header>

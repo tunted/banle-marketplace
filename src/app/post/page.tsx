@@ -1,14 +1,22 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
-import Image from 'next/image'
 import { validatePhoneNumber, compressImage } from '@/lib/utils'
 import { checkRateLimit, recordPostAttempt, getRemainingTimeMinutes } from '@/lib/rateLimit'
-import { categories } from '@/lib/categories'
-import LocationFilter from '@/components/LocationFilter'
+
+interface Province {
+  code: string
+  name: string
+}
+
+interface Ward {
+  code: string
+  name: string
+  province_code: string
+}
 
 export default function PostPage() {
   const router = useRouter()
@@ -19,16 +27,79 @@ export default function PostPage() {
     phone: '',
     location: '',
     description: '',
-    category: '',
     province_code: '',
     ward_code: '',
   })
   const [images, setImages] = useState<File[]>([])
   const [imagePreviewUrls, setImagePreviewUrls] = useState<string[]>([])
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const [rateLimitError, setRateLimitError] = useState<string | null>(null)
   const [phoneError, setPhoneError] = useState<string | null>(null)
-  const [isLocationModalOpen, setIsLocationModalOpen] = useState(false)
-  const [locationName, setLocationName] = useState<string>('Chọn khu vực')
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({})
+  const [provinces, setProvinces] = useState<Province[]>([])
+  const [wards, setWards] = useState<Ward[]>([])
+  const [loadingProvinces, setLoadingProvinces] = useState(false)
+  const [loadingWards, setLoadingWards] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Load provinces on mount
+  useEffect(() => {
+    async function loadProvinces() {
+      setLoadingProvinces(true)
+      try {
+        const { data, error } = await supabase
+          .from('provinces')
+          .select('code, name')
+          .order('name')
+
+        if (error) {
+          console.error('Error fetching provinces:', error)
+        } else {
+          setProvinces(data || [])
+        }
+      } catch (err) {
+        console.error('Error loading provinces:', err)
+      } finally {
+        setLoadingProvinces(false)
+      }
+    }
+    loadProvinces()
+  }, [])
+
+  // Load wards when province is selected
+  useEffect(() => {
+    async function loadWards() {
+      if (!formData.province_code) {
+        setWards([])
+        setFormData((prev) => ({ ...prev, ward_code: '' }))
+        return
+      }
+
+      setLoadingWards(true)
+      try {
+        const { data, error } = await supabase
+          .from('wards')
+          .select('code, name, province_code')
+          .eq('province_code', formData.province_code)
+          .order('name')
+
+        if (error) {
+          console.error('Error fetching wards:', error)
+          setWards([])
+        } else {
+          setWards(data || [])
+          // Reset ward_code when province changes
+          setFormData((prev) => ({ ...prev, ward_code: '' }))
+        }
+      } catch (err) {
+        console.error('Error loading wards:', err)
+        setWards([])
+      } finally {
+        setLoadingWards(false)
+      }
+    }
+    loadWards()
+  }, [formData.province_code])
 
   // Check rate limit on mount
   useEffect(() => {
@@ -46,6 +117,7 @@ export default function PostPage() {
   ) => {
     const { name, value } = e.target
     setFormData((prev) => ({ ...prev, [name]: value }))
+    setFormErrors((prev) => ({ ...prev, [name]: '' }))
     
     // Validate phone number in real-time
     if (name === 'phone') {
@@ -59,31 +131,82 @@ export default function PostPage() {
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
-    if (files.length > 5) {
-      alert('Bạn chỉ có thể tải lên tối đa 5 hình ảnh')
+    setUploadError(null)
+
+    // Validate total count
+    if (files.length + images.length > 5) {
+      setUploadError('Bạn chỉ có thể tải lên tối đa 5 hình ảnh')
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
       return
     }
-    setImages(files)
+
+    // Validate each file
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
+    const allowedExtensions = ['jpg', 'jpeg', 'png', 'webp']
+    const maxSize = 2 * 1024 * 1024 // 2MB
+
+    const validFiles: File[] = []
+    const errors: string[] = []
+
+    files.forEach((file) => {
+      const fileExtension = file.name.split('.').pop()?.toLowerCase()
+      
+      // Check file type
+      if (!allowedTypes.includes(file.type) && !(fileExtension && allowedExtensions.includes(fileExtension))) {
+        errors.push(`File "${file.name}" không hợp lệ. Chỉ chấp nhận JPG, PNG, hoặc WEBP.`)
+        return
+      }
+
+      // Check file size
+      if (file.size > maxSize) {
+        errors.push(`File "${file.name}" quá lớn. Kích thước tối đa là 2MB.`)
+        return
+      }
+
+      validFiles.push(file)
+    })
+
+    if (errors.length > 0) {
+      setUploadError(errors.join(' '))
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+      return
+    }
+
+    // Add valid files to existing images
+    const newImages = [...images, ...validFiles]
+    setImages(newImages)
     
-    // Create preview URLs
-    const urls = files.map(file => URL.createObjectURL(file))
-    setImagePreviewUrls(urls)
+    // Create preview URLs using Object URLs (safe for <img> tags)
+    const newUrls = validFiles.map(file => URL.createObjectURL(file))
+    setImagePreviewUrls([...imagePreviewUrls, ...newUrls])
+    
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
   }
 
   const removeImage = (index: number) => {
+    // Revoke object URL to free memory
+    URL.revokeObjectURL(imagePreviewUrls[index])
+    
     const newImages = images.filter((_, i) => i !== index)
     const newUrls = imagePreviewUrls.filter((_, i) => i !== index)
     setImages(newImages)
     setImagePreviewUrls(newUrls)
-    
-    // Revoke object URLs to free memory
-    URL.revokeObjectURL(imagePreviewUrls[index])
+    setUploadError(null)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setRateLimitError(null)
+    setUploadError(null)
+    setFormErrors({})
 
     try {
       // Check rate limit
@@ -101,16 +224,38 @@ export default function PostPage() {
         return
       }
 
-      // Validate required fields
-      if (!formData.title || !formData.price || !formData.phone || !formData.location) {
-        alert('Vui lòng điền đầy đủ các trường bắt buộc')
+      // Get current user
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser()
+
+      if (userError || !user) {
+        alert('Bạn cần đăng nhập để đăng tin.')
+        router.push('/login')
         setLoading(false)
         return
       }
 
-      // Validate phone number
-      if (!validatePhoneNumber(formData.phone)) {
-        setPhoneError('Số điện thoại không hợp lệ. Ví dụ: 0912345678 hoặc +84912345678')
+      // Validate required fields
+      const errors: Record<string, string> = {}
+      if (!formData.title.trim()) {
+        errors.title = 'Vui lòng nhập tiêu đề'
+      }
+      if (!formData.price || parseFloat(formData.price) <= 0) {
+        errors.price = 'Vui lòng nhập giá hợp lệ'
+      }
+      if (!formData.phone) {
+        errors.phone = 'Vui lòng nhập số điện thoại'
+      } else if (!validatePhoneNumber(formData.phone)) {
+        errors.phone = 'Số điện thoại không hợp lệ'
+      }
+      if (!formData.location.trim()) {
+        errors.location = 'Vui lòng nhập địa chỉ'
+      }
+
+      if (Object.keys(errors).length > 0) {
+        setFormErrors(errors)
         setLoading(false)
         return
       }
@@ -118,57 +263,92 @@ export default function PostPage() {
       // Upload images to Supabase Storage
       const imageUrls: string[] = []
 
-      for (let i = 0; i < images.length; i++) {
-        const originalFile = images[i]
-        
-        // Compress image before upload (reduces storage costs and improves load times)
-        let fileToUpload: Blob | File = originalFile
-        
+      if (images.length > 0) {
         try {
-          // Only compress if file is larger than 500KB
-          if (originalFile.size > 500 * 1024) {
-            const compressedBlob = await compressImage(originalFile, 1920, 1920, 0.85)
-            fileToUpload = new File([compressedBlob], originalFile.name, {
-              type: originalFile.type,
-              lastModified: originalFile.lastModified,
-            })
+          for (let i = 0; i < images.length; i++) {
+            const originalFile = images[i]
+            
+            // Compress image before upload if needed
+            let fileToUpload: Blob | File = originalFile
+            
+            try {
+              // Only compress if file is larger than 500KB
+              if (originalFile.size > 500 * 1024) {
+                const compressedBlob = await compressImage(originalFile, 1920, 1920, 0.85)
+                fileToUpload = new File([compressedBlob], originalFile.name, {
+                  type: originalFile.type,
+                  lastModified: originalFile.lastModified,
+                })
+              }
+            } catch (compressError) {
+              console.warn('Image compression failed, uploading original:', compressError)
+              // Fallback to original file if compression fails
+            }
+
+            // Generate unique filename: ${Date.now()}-${index}-${file.name}
+            const fileName = `${Date.now()}-${i}-${originalFile.name}`
+
+            const { error: uploadError, data } = await supabase.storage
+              .from('listings')
+              .upload(fileName, fileToUpload, {
+                cacheControl: '3600',
+                contentType: originalFile.type,
+                upsert: false,
+              })
+
+            if (uploadError) {
+              console.error('Upload error:', uploadError)
+              
+              // Handle specific errors
+              const statusCode = uploadError.statusCode
+              const errorMsg = uploadError.message?.toLowerCase() || ''
+              
+              if (statusCode === 404 || errorMsg.includes('not found') || errorMsg.includes('bucket')) {
+                setUploadError('Hệ thống đang cập nhật. Vui lòng thử lại sau.')
+              } else if (statusCode === 403 || statusCode === 400 || errorMsg.includes('permission') || errorMsg.includes('forbidden') || errorMsg.includes('policy')) {
+                setUploadError('Không có quyền tải ảnh lên. Vui lòng liên hệ hỗ trợ.')
+              } else if (errorMsg.includes('network') || errorMsg.includes('timeout') || errorMsg.includes('failed to fetch')) {
+                setUploadError('Không thể tải ảnh lên. Vui lòng kiểm tra kết nối.')
+              } else {
+                setUploadError('Không thể tải ảnh lên. Vui lòng thử lại.')
+              }
+              
+              setLoading(false)
+              return
+            }
+
+            if (!data) {
+              setUploadError('Không thể tải ảnh lên. Vui lòng thử lại.')
+              setLoading(false)
+              return
+            }
+
+            // Get public URL
+            const { data: urlData } = supabase.storage
+              .from('listings')
+              .getPublicUrl(data.path)
+
+            if (urlData?.publicUrl) {
+              imageUrls.push(urlData.publicUrl)
+            }
           }
-        } catch (compressError) {
-          console.warn('Image compression failed, uploading original:', compressError)
-          // Fallback to original file if compression fails
-        }
-
-        const fileExt = originalFile.name.split('.').pop()
-        const fileName = `${Date.now()}-${i}-${Math.random().toString(36).substring(7)}.${fileExt}`
-
-        const { error: uploadError, data } = await supabase.storage
-          .from('listings')
-          .upload(fileName, fileToUpload)
-
-        if (uploadError) {
-          console.error('Upload error:', uploadError)
-          alert(`Lỗi khi tải lên hình ảnh: ${uploadError.message}`)
+        } catch (uploadException: any) {
+          console.error('Exception during upload:', uploadException)
+          setUploadError('Không thể tải ảnh lên. Vui lòng kiểm tra kết nối.')
           setLoading(false)
           return
         }
-
-        // Get public URL
-        const { data: urlData } = supabase.storage
-          .from('listings')
-          .getPublicUrl(data.path)
-
-        imageUrls.push(urlData.publicUrl)
       }
 
       // Insert listing into database
       const { error: insertError } = await supabase.from('listings').insert({
-        title: formData.title,
+        user_id: user.id,
+        title: formData.title.trim(),
         price: parseFloat(formData.price),
         phone: formData.phone,
-        location: formData.location,
-        description: formData.description || null,
+        location: formData.location.trim(),
+        description: formData.description.trim() || null,
         images: imageUrls.length > 0 ? imageUrls : null,
-        category: formData.category || null,
         province_code: formData.province_code || null,
         ward_code: formData.ward_code || null,
       })
@@ -226,9 +406,14 @@ export default function PostPage() {
               required
               value={formData.title}
               onChange={handleInputChange}
-              className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent"
+              className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent ${
+                formErrors.title ? 'border-red-300' : 'border-gray-300'
+              }`}
               placeholder="Nhập tiêu đề tin đăng"
             />
+            {formErrors.title && (
+              <p className="mt-1 text-sm text-red-600">{formErrors.title}</p>
+            )}
           </div>
 
           <div>
@@ -244,9 +429,14 @@ export default function PostPage() {
               step="1000"
               value={formData.price}
               onChange={handleInputChange}
-              className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent"
+              className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent ${
+                formErrors.price ? 'border-red-300' : 'border-gray-300'
+              }`}
               placeholder="Nhập giá"
             />
+            {formErrors.price && (
+              <p className="mt-1 text-sm text-red-600">{formErrors.price}</p>
+            )}
           </div>
 
           <div>
@@ -260,60 +450,98 @@ export default function PostPage() {
               required
               value={formData.phone}
               onChange={handleInputChange}
-              className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent"
+              className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent ${
+                formErrors.phone || phoneError ? 'border-red-300' : 'border-gray-300'
+              }`}
               placeholder="Nhập số điện thoại (VD: 0912345678)"
             />
             {phoneError && (
               <p className="mt-1 text-sm text-red-600">{phoneError}</p>
             )}
-            {!phoneError && formData.phone && (
+            {formErrors.phone && !phoneError && (
+              <p className="mt-1 text-sm text-red-600">{formErrors.phone}</p>
+            )}
+            {!phoneError && !formErrors.phone && formData.phone && (
               <p className="mt-1 text-sm text-green-600">✓ Số điện thoại hợp lệ</p>
             )}
           </div>
 
           <div>
-            <label htmlFor="location" className="block text-sm font-medium text-gray-700 mb-2">
-              Địa điểm <span className="text-red-500">*</span>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Khu vực
             </label>
-            <div className="space-y-2">
-              <button
-                type="button"
-                onClick={() => setIsLocationModalOpen(true)}
-                className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white text-left hover:bg-gray-50 transition-colors"
-              >
-                {locationName}
-              </button>
-              <input
-                type="text"
-                id="location"
-                name="location"
-                required
-                value={formData.location}
-                onChange={handleInputChange}
-                className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                placeholder="Nhập địa chỉ chi tiết (số nhà, tên đường...)"
-              />
+            <div className="space-y-3">
+              <div>
+                <label htmlFor="province" className="block text-xs text-gray-500 mb-1">
+                  Tỉnh/Thành phố
+                </label>
+                <select
+                  id="province"
+                  name="province_code"
+                  value={formData.province_code}
+                  onChange={handleInputChange}
+                  disabled={loadingProvinces}
+                  className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
+                >
+                  <option value="">
+                    {loadingProvinces ? 'Đang tải...' : 'Chọn tỉnh/thành phố'}
+                  </option>
+                  {provinces.map((province) => (
+                    <option key={province.code} value={province.code}>
+                      {province.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label htmlFor="ward" className="block text-xs text-gray-500 mb-1">
+                  Quận/Huyện/Xã
+                </label>
+                <select
+                  id="ward"
+                  name="ward_code"
+                  value={formData.ward_code}
+                  onChange={handleInputChange}
+                  disabled={!formData.province_code || loadingWards}
+                  className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white disabled:bg-gray-50"
+                >
+                  <option value="">
+                    {!formData.province_code
+                      ? 'Chọn tỉnh/thành phố trước'
+                      : loadingWards
+                      ? 'Đang tải...'
+                      : 'Chọn quận/huyện/xã'}
+                  </option>
+                  {wards.map((ward) => (
+                    <option key={ward.code} value={ward.code}>
+                      {ward.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
 
           <div>
-            <label htmlFor="category" className="block text-sm font-medium text-gray-700 mb-2">
-              Danh mục
+            <label htmlFor="location" className="block text-sm font-medium text-gray-700 mb-2">
+              Địa chỉ chi tiết <span className="text-red-500">*</span>
             </label>
-            <select
-              id="category"
-              name="category"
-              value={formData.category}
+            <input
+              type="text"
+              id="location"
+              name="location"
+              required
+              value={formData.location}
               onChange={handleInputChange}
-              className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
-            >
-              <option value="">Chọn danh mục</option>
-              {categories.map((cat) => (
-                <option key={cat.id} value={cat.slug}>
-                  {cat.icon} {cat.name}
-                </option>
-              ))}
-            </select>
+              className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent ${
+                formErrors.location ? 'border-red-300' : 'border-gray-300'
+              }`}
+              placeholder="Nhập địa chỉ chi tiết (số nhà, tên đường...)"
+            />
+            {formErrors.location && (
+              <p className="mt-1 text-sm text-red-600">{formErrors.location}</p>
+            )}
           </div>
 
           <div>
@@ -333,65 +561,88 @@ export default function PostPage() {
 
           <div>
             <label htmlFor="images" className="block text-sm font-medium text-gray-700 mb-2">
-              Hình ảnh (Tối đa 5 ảnh)
+              Hình ảnh (Tối đa 5 ảnh, mỗi ảnh tối đa 2MB)
             </label>
-            <input
-              type="file"
-              id="images"
-              name="images"
-              accept="image/*"
-              multiple
-              onChange={handleImageChange}
-              className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-500 file:text-white hover:file:bg-green-600"
-            />
-            {imagePreviewUrls.length > 0 && (
-              <div className="mt-4 flex flex-wrap gap-2">
-                {imagePreviewUrls.map((url, index) => (
-                  <div key={index} className="relative w-16 h-16 rounded-lg overflow-hidden border border-gray-300">
-                    <Image
-                      src={url}
-                      alt={`Preview ${index + 1}`}
-                      fill
-                      className="object-cover"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeImage(index)}
-                      className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs hover:bg-red-600"
+            <div className="space-y-3">
+              <input
+                ref={fileInputRef}
+                type="file"
+                id="images"
+                name="images"
+                accept="image/jpeg,image/jpg,image/png,image/webp"
+                multiple
+                onChange={handleImageChange}
+                disabled={loading || images.length >= 5}
+                className="hidden"
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={loading || images.length >= 5}
+                className={`px-4 py-2 bg-green-500 text-white rounded-lg font-medium hover:bg-green-600 transition-colors ${
+                  loading || images.length >= 5 ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
+              >
+                {images.length >= 5 ? 'Đã đạt giới hạn' : 'Chọn ảnh'}
+              </button>
+              
+              {uploadError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                  <p className="text-sm text-red-600">{uploadError}</p>
+                </div>
+              )}
+              
+              {imagePreviewUrls.length > 0 && (
+                <div className="flex gap-3 overflow-x-auto pb-2">
+                  {imagePreviewUrls.map((url, index) => (
+                    <div
+                      key={index}
+                      className="relative w-20 h-20 rounded-lg overflow-hidden border-2 border-gray-300 bg-gray-100 flex-shrink-0"
                     >
-                      ×
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
+                      {/* Use <img> instead of next/image for previews */}
+                      {url && url.startsWith('blob:') ? (
+                        <img
+                          src={url}
+                          alt={`Preview ${index + 1}`}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            // Fallback if image fails to load
+                            const target = e.target as HTMLImageElement
+                            target.style.display = 'none'
+                          }}
+                        />
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => removeImage(index)}
+                        disabled={loading}
+                        className="absolute top-1 right-1 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold hover:bg-red-600 transition-colors disabled:opacity-50 shadow-md"
+                        aria-label="Xóa ảnh"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              {images.length === 0 && !loading && (
+                <p className="text-sm text-gray-500">
+                  Chọn tối đa 5 ảnh (JPG, PNG, WEBP - mỗi ảnh tối đa 2MB)
+                </p>
+              )}
+            </div>
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-gradient-to-r from-green-500 to-green-600 text-white py-3.5 rounded-xl font-bold disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-md transition-shadow"
+            className="w-full bg-gradient-to-r from-green-500 to-green-600 text-white py-3 rounded-xl font-bold disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-md transition-shadow"
           >
-            {loading ? 'Đang đăng tin...' : 'Đăng tin'}
+            {loading ? 'Đang đăng tin...' : 'Đăng tin miễn phí'}
           </button>
         </form>
-
-        {/* Location Filter Modal */}
-        <LocationFilter
-          isOpen={isLocationModalOpen}
-          onClose={() => setIsLocationModalOpen(false)}
-          onApply={(provinceCode, wardCode, name) => {
-            setFormData((prev) => ({
-              ...prev,
-              province_code: provinceCode || '',
-              ward_code: wardCode || '',
-            }))
-            setLocationName(name)
-          }}
-          currentLocation={locationName}
-        />
       </div>
     </div>
   )
 }
-

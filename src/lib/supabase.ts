@@ -16,7 +16,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
  */
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    persistSession: false, // Disable session persistence for anonymous users (better for SSR)
+    persistSession: true, // Enable session persistence for auth pages
   },
 })
 
