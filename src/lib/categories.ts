@@ -29,30 +29,3 @@ export const categories: Category[] = [
   { id: '16', name: 'Khác', icon: '📦', slug: 'khac' },
 ]
 
-export const vietnamLocations = [
-  'Chọn khu vực',
-  'Quận Gò Vấp',
-  'Quận 1',
-  'Quận 2',
-  'Quận 3',
-  'Quận 4',
-  'Quận 5',
-  'Quận 6',
-  'Quận 7',
-  'Quận 8',
-  'Quận 9',
-  'Quận 10',
-  'Quận 11',
-  'Quận 12',
-  'Quận Bình Thạnh',
-  'Quận Tân Bình',
-  'Quận Tân Phú',
-  'Quận Phú Nhuận',
-  'Quận Thủ Đức',
-  'Huyện Bình Chánh',
-  'Huyện Cần Giờ',
-  'Huyện Củ Chi',
-  'Huyện Hóc Môn',
-  'Huyện Nhà Bè',
-]
-

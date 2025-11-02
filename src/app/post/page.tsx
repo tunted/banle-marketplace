@@ -8,6 +8,7 @@ import Image from 'next/image'
 import { validatePhoneNumber, compressImage } from '@/lib/utils'
 import { checkRateLimit, recordPostAttempt, getRemainingTimeMinutes } from '@/lib/rateLimit'
 import { categories } from '@/lib/categories'
+import LocationFilter from '@/components/LocationFilter'
 
 export default function PostPage() {
   const router = useRouter()
@@ -19,11 +20,15 @@ export default function PostPage() {
     location: '',
     description: '',
     category: '',
+    province_code: '',
+    ward_code: '',
   })
   const [images, setImages] = useState<File[]>([])
   const [imagePreviewUrls, setImagePreviewUrls] = useState<string[]>([])
   const [rateLimitError, setRateLimitError] = useState<string | null>(null)
   const [phoneError, setPhoneError] = useState<string | null>(null)
+  const [isLocationModalOpen, setIsLocationModalOpen] = useState(false)
+  const [locationName, setLocationName] = useState<string>('Chọn khu vực')
 
   // Check rate limit on mount
   useEffect(() => {
@@ -164,6 +169,8 @@ export default function PostPage() {
         description: formData.description || null,
         images: imageUrls.length > 0 ? imageUrls : null,
         category: formData.category || null,
+        province_code: formData.province_code || null,
+        ward_code: formData.ward_code || null,
       })
 
       if (insertError) {
@@ -268,16 +275,25 @@ export default function PostPage() {
             <label htmlFor="location" className="block text-sm font-medium text-gray-700 mb-2">
               Địa điểm <span className="text-red-500">*</span>
             </label>
-            <input
-              type="text"
-              id="location"
-              name="location"
-              required
-              value={formData.location}
-              onChange={handleInputChange}
-              className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent"
-              placeholder="Nhập địa điểm"
-            />
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => setIsLocationModalOpen(true)}
+                className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white text-left hover:bg-gray-50 transition-colors"
+              >
+                {locationName}
+              </button>
+              <input
+                type="text"
+                id="location"
+                name="location"
+                required
+                value={formData.location}
+                onChange={handleInputChange}
+                className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                placeholder="Nhập địa chỉ chi tiết (số nhà, tên đường...)"
+              />
+            </div>
           </div>
 
           <div>
@@ -359,6 +375,21 @@ export default function PostPage() {
             {loading ? 'Đang đăng tin...' : 'Đăng tin'}
           </button>
         </form>
+
+        {/* Location Filter Modal */}
+        <LocationFilter
+          isOpen={isLocationModalOpen}
+          onClose={() => setIsLocationModalOpen(false)}
+          onApply={(provinceCode, wardCode, name) => {
+            setFormData((prev) => ({
+              ...prev,
+              province_code: provinceCode || '',
+              ward_code: wardCode || '',
+            }))
+            setLocationName(name)
+          }}
+          currentLocation={locationName}
+        />
       </div>
     </div>
   )

@@ -1,11 +1,22 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 import Image from 'next/image'
 import { formatCurrency, getTimeAgo, isNewListing } from '@/lib/utils'
-import { categories, vietnamLocations, type Category } from '@/lib/categories'
+import { categories, type Category } from '@/lib/categories'
+
+interface Province {
+  code: string
+  name: string
+}
+
+interface Ward {
+  code: string
+  name: string
+  province_code: string
+}
 
 interface Listing {
   id: string
@@ -15,14 +26,28 @@ interface Listing {
   images: string[] | null
   created_at: string
   category?: string
+  province_code?: string
+  ward_code?: string
 }
 
-async function fetchListings(): Promise<Listing[]> {
-  const { data, error } = await supabase
+async function fetchListings(
+  provinceCode?: string | null,
+  wardCode?: string | null
+): Promise<Listing[]> {
+  let query = supabase
     .from('listings')
-    .select('id, title, price, location, images, created_at, category')
+    .select('id, title, price, location, images, created_at, category, province_code, ward_code')
     .order('created_at', { ascending: false })
     .limit(200)
+
+  // Apply location filters
+  if (wardCode) {
+    query = query.eq('ward_code', wardCode)
+  } else if (provinceCode) {
+    query = query.eq('province_code', provinceCode)
+  }
+
+  const { data, error } = await query
 
   if (error) {
     console.error('Error fetching listings:', error)
@@ -36,18 +61,122 @@ export default function HomePage() {
   const [listings, setListings] = useState<Listing[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedCategory, setSelectedCategory] = useState<string>('')
-  const [selectedLocation, setSelectedLocation] = useState<string>('')
+  const [selectedProvinceCode, setSelectedProvinceCode] = useState<string | null>(null)
+  const [selectedWardCode, setSelectedWardCode] = useState<string | null>(null)
+  const [locationName, setLocationName] = useState<string>('Chọn khu vực')
   const [searchQuery, setSearchQuery] = useState<string>('')
+  const [isLocationModalOpen, setIsLocationModalOpen] = useState(false)
+  
+  // Location modal state
+  const [provinces, setProvinces] = useState<Province[]>([])
+  const [wards, setWards] = useState<Ward[]>([])
+  const [modalSelectedProvince, setModalSelectedProvince] = useState<string>('')
+  const [modalSelectedWard, setModalSelectedWard] = useState<string>('')
+  const [loadingProvinces, setLoadingProvinces] = useState(false)
+  const [loadingWards, setLoadingWards] = useState(false)
+  const [locationError, setLocationError] = useState<string | null>(null)
+  const modalRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     async function loadListings() {
       setLoading(true)
-      const data = await fetchListings()
+      const data = await fetchListings(selectedProvinceCode, selectedWardCode)
       setListings(data)
       setLoading(false)
     }
     loadListings()
-  }, [])
+  }, [selectedProvinceCode, selectedWardCode])
+
+  // Load provinces when modal opens
+  useEffect(() => {
+    if (isLocationModalOpen) {
+      async function loadProvinces() {
+        setLoadingProvinces(true)
+        setLocationError(null)
+        try {
+          const { data, error } = await supabase
+            .from('provinces')
+            .select('code, name')
+            .order('name')
+          
+          if (error) {
+            console.error('Error fetching provinces:', error)
+            setLocationError('Không thể tải danh sách tỉnh/thành phố. Vui lòng kiểm tra kết nối database.')
+            alert('Lỗi: Không thể tải danh sách tỉnh/thành phố. ' + error.message)
+          } else {
+            setProvinces(data || [])
+            if (!data || data.length === 0) {
+              setLocationError('Chưa có dữ liệu tỉnh/thành phố. Vui lòng import dữ liệu vào Supabase.')
+            }
+          }
+        } catch (err: any) {
+          console.error('Error loading provinces:', err)
+          setLocationError('Không thể tải danh sách tỉnh/thành phố. Vui lòng kiểm tra kết nối database.')
+          alert('Lỗi: Không thể tải danh sách tỉnh/thành phố. ' + (err?.message || 'Unknown error'))
+        } finally {
+          setLoadingProvinces(false)
+        }
+      }
+      loadProvinces()
+      // Reset modal selections
+      setModalSelectedProvince('')
+      setModalSelectedWard('')
+      setWards([])
+    }
+  }, [isLocationModalOpen])
+
+  // Load wards when province is selected
+  useEffect(() => {
+    if (isLocationModalOpen && modalSelectedProvince) {
+      async function loadWards() {
+        setLoadingWards(true)
+        setLocationError(null)
+        try {
+          const { data, error } = await supabase
+            .from('wards')
+            .select('code, name, province_code')
+            .eq('province_code', modalSelectedProvince)
+            .order('name')
+          
+          if (error) {
+            console.error('Error fetching wards:', error)
+            setLocationError('Không thể tải danh sách quận/huyện.')
+            alert('Lỗi: Không thể tải danh sách quận/huyện. ' + error.message)
+          } else {
+            setWards(data || [])
+            setModalSelectedWard('')
+            if (!data || data.length === 0) {
+              setLocationError('Chưa có dữ liệu quận/huyện cho tỉnh này.')
+            }
+          }
+        } catch (err: any) {
+          console.error('Error loading wards:', err)
+          setLocationError('Không thể tải danh sách quận/huyện.')
+          alert('Lỗi: Không thể tải danh sách quận/huyện. ' + (err?.message || 'Unknown error'))
+        } finally {
+          setLoadingWards(false)
+        }
+      }
+      loadWards()
+    } else if (isLocationModalOpen && !modalSelectedProvince) {
+      setWards([])
+      setModalSelectedWard('')
+    }
+  }, [isLocationModalOpen, modalSelectedProvince])
+
+  // Handle click outside modal
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (modalRef.current && !modalRef.current.contains(event.target as Node)) {
+        setIsLocationModalOpen(false)
+      }
+    }
+
+    if (isLocationModalOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+      return () => document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [isLocationModalOpen])
 
   const filteredListings = useMemo(() => {
     return listings.filter((listing) => {
@@ -56,11 +185,13 @@ export default function HomePage() {
         return false
       }
 
-      // Location filter
-      if (selectedLocation && selectedLocation !== 'Chọn khu vực') {
-        if (!listing.location.toLowerCase().includes(selectedLocation.toLowerCase())) {
-          return false
-        }
+      // Location filter is already applied at the database level via province_code/ward_code
+      // Additional validation for exact code matching
+      if (selectedWardCode && listing.ward_code !== selectedWardCode) {
+        return false
+      }
+      if (selectedProvinceCode && !selectedWardCode && listing.province_code !== selectedProvinceCode) {
+        return false
       }
 
       // Keyword search
@@ -75,11 +206,36 @@ export default function HomePage() {
 
       return true
     })
-  }, [listings, selectedCategory, selectedLocation, searchQuery])
+  }, [listings, selectedCategory, locationName, searchQuery, selectedProvinceCode, selectedWardCode])
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
     // Filtering happens automatically via useMemo
+  }
+
+  const handleLocationApply = () => {
+    const province = provinces.find((p) => p.code === modalSelectedProvince)
+    const ward = wards.find((w) => w.code === modalSelectedWard)
+
+    let newLocationName = 'Chọn khu vực'
+    
+    if (ward && province) {
+      newLocationName = ward.name
+    } else if (province) {
+      newLocationName = province.name
+    }
+
+    setSelectedProvinceCode(modalSelectedProvince || null)
+    setSelectedWardCode(modalSelectedWard || null)
+    setLocationName(newLocationName)
+    setIsLocationModalOpen(false)
+  }
+
+  const handleLocationClear = () => {
+    setSelectedProvinceCode(null)
+    setSelectedWardCode(null)
+    setLocationName('Chọn khu vực')
+    setIsLocationModalOpen(false)
   }
 
   return (
@@ -127,19 +283,15 @@ export default function HomePage() {
             </svg>
           </div>
 
-          {/* Location Dropdown */}
+          {/* Location Button */}
           <div className="flex-shrink-0">
-            <select
-              value={selectedLocation}
-              onChange={(e) => setSelectedLocation(e.target.value)}
-              className="w-full sm:w-48 p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
+            <button
+              type="button"
+              onClick={() => setIsLocationModalOpen(true)}
+              className="w-full sm:w-48 p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white text-left hover:bg-gray-50 transition-colors"
             >
-              {vietnamLocations.map((loc) => (
-                <option key={loc} value={loc}>
-                  {loc}
-                </option>
-              ))}
-            </select>
+              {locationName}
+            </button>
           </div>
 
           {/* Search Button */}
@@ -182,7 +334,7 @@ export default function HomePage() {
       ) : filteredListings.length === 0 ? (
         <div className="text-center py-16">
           <p className="text-gray-500">
-            {searchQuery || selectedCategory || (selectedLocation && selectedLocation !== 'Chọn khu vực')
+            {searchQuery || selectedCategory || (locationName && locationName !== 'Chọn khu vực')
               ? 'Không tìm thấy kết quả phù hợp'
               : 'Chưa có tin đăng nào. Hãy đăng tin đầu tiên!'}
           </p>
@@ -253,6 +405,113 @@ export default function HomePage() {
               </Link>
             )
           })}
+        </div>
+      )}
+
+      {/* Location Filter Modal */}
+      {isLocationModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div
+            ref={modalRef}
+            className="bg-white rounded-xl shadow-lg max-w-md w-full p-6"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-gray-900">Chọn khu vực</h2>
+              <button
+                onClick={() => setIsLocationModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <svg
+                  className="w-6 h-6"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {locationError && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                  <p className="text-sm text-yellow-800">{locationError}</p>
+                </div>
+              )}
+
+              {/* Province Selection */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Tỉnh/Thành phố
+                </label>
+                <select
+                  value={modalSelectedProvince}
+                  onChange={(e) => setModalSelectedProvince(e.target.value)}
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
+                  disabled={loadingProvinces}
+                >
+                  <option value="">
+                    {loadingProvinces ? 'Đang tải...' : provinces.length === 0 ? 'Chưa có dữ liệu' : 'Chọn tỉnh/thành phố'}
+                  </option>
+                  {provinces.map((province) => (
+                    <option key={province.code} value={province.code}>
+                      {province.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Ward Selection */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Quận/Huyện/Xã
+                </label>
+                <select
+                  value={modalSelectedWard}
+                  onChange={(e) => setModalSelectedWard(e.target.value)}
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white disabled:bg-gray-100"
+                  disabled={!modalSelectedProvince || loadingWards}
+                >
+                  <option value="">
+                    {!modalSelectedProvince
+                      ? 'Chọn tỉnh/thành phố trước'
+                      : loadingWards
+                      ? 'Đang tải...'
+                      : wards.length === 0
+                      ? 'Chưa có dữ liệu'
+                      : 'Chọn quận/huyện/xã'}
+                  </option>
+                  {wards.map((ward) => (
+                    <option key={ward.code} value={ward.code}>
+                      {ward.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="mt-6 space-y-2">
+              <button
+                onClick={handleLocationApply}
+                disabled={loadingProvinces || loadingWards}
+                className="w-full py-3 bg-yellow-400 text-gray-900 font-semibold rounded-xl hover:bg-yellow-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Áp dụng
+              </button>
+              <button
+                onClick={handleLocationClear}
+                className="w-full py-2 text-gray-600 hover:text-gray-800 transition-colors text-sm"
+              >
+                Xóa bộ lọc
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
