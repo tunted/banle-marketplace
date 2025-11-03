@@ -93,8 +93,20 @@ export default function ConversationPage() {
           .eq('id', conversationId)
           .single()
 
-        if (convError || !convData) {
-          console.error('Conversation not found')
+        if (convError) {
+          console.error('[ConversationPage] Error fetching conversation:', convError)
+          if (convError.code === 'PGRST116') {
+            alert('Cuộc trò chuyện không tồn tại.')
+          } else {
+            alert(`Không thể tải cuộc trò chuyện: ${convError.message || 'Vui lòng thử lại.'}`)
+          }
+          router.push('/messages')
+          return
+        }
+
+        if (!convData) {
+          console.error('[ConversationPage] Conversation data is null')
+          alert('Cuộc trò chuyện không tồn tại.')
           router.push('/messages')
           return
         }
@@ -107,11 +119,15 @@ export default function ConversationPage() {
 
         // Get other user info
         const otherUserId = convData.user1_id === user.id ? convData.user2_id : convData.user1_id
-        const { data: userData } = await supabase
+        const { data: userData, error: profileError } = await supabase
           .from('user_profiles')
           .select('id, full_name, avatar_url')
           .eq('id', otherUserId)
-          .single()
+          .maybeSingle() // Use maybeSingle to handle missing profiles gracefully
+
+        if (profileError && profileError.code !== 'PGRST116') {
+          console.warn('[ConversationPage] Error fetching user profile:', profileError)
+        }
 
         setConversation({
           id: conversationId,
@@ -166,13 +182,20 @@ export default function ConversationPage() {
           supabase.removeChannel(channel)
         }
       } catch (err: any) {
-        console.error('Error loading conversation:', err)
+        console.error('[ConversationPage] Error loading conversation:', err)
+        // Show error message before redirecting
+        if (err?.message) {
+          alert(`Không thể tải cuộc trò chuyện: ${err.message}`)
+        }
         router.push('/messages')
       }
     }
 
     if (conversationId) {
       loadConversation()
+    } else {
+      console.warn('[ConversationPage] No conversation ID provided')
+      router.push('/messages')
     }
   }, [conversationId, router])
 
@@ -299,7 +322,9 @@ export default function ConversationPage() {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <p className="text-gray-500">Đang tải...</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500 mx-auto mb-4"></div>
+          <p className="text-gray-500 text-lg">Đang tải cuộc trò chuyện...</p>
+          <p className="text-gray-400 text-sm mt-2">Vui lòng đợi trong giây lát</p>
         </div>
       </div>
     )

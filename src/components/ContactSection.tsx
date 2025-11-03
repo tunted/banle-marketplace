@@ -81,9 +81,12 @@ export default function ContactSection({ phone, seller, postId }: ContactSection
     
     if (!currentSeller || !currentSeller.id) {
       alert('Không thể tìm thấy thông tin người bán.')
+      console.warn('[ContactSection] No seller data available:', { sellerData, seller })
       return
     }
+
     setChatLoading(true)
+    console.log('[ContactSection] Starting chat with seller:', currentSeller.id)
 
     try {
       const {
@@ -92,6 +95,7 @@ export default function ContactSection({ phone, seller, postId }: ContactSection
       } = await supabase.auth.getUser()
 
       if (userError || !user) {
+        console.warn('[ContactSection] User not authenticated:', userError)
         setChatLoading(false)
         router.push('/login')
         return
@@ -103,29 +107,43 @@ export default function ContactSection({ phone, seller, postId }: ContactSection
         return
       }
 
+      console.log('[ContactSection] Checking for existing conversation between:', user.id, 'and', currentSeller.id)
+
       // Check if conversation already exists
       // Try both possible combinations: user1=current, user2=seller OR user1=seller, user2=current
-      const { data: existingConv1 } = await supabase
+      const { data: existingConv1, error: error1 } = await supabase
         .from('conversations')
         .select('id')
         .eq('user1_id', user.id)
         .eq('user2_id', currentSeller.id)
         .maybeSingle()
 
-      const { data: existingConv2 } = await supabase
+      if (error1 && error1.code !== 'PGRST116') {
+        console.error('[ContactSection] Error checking conversation 1:', error1)
+      }
+
+      const { data: existingConv2, error: error2 } = await supabase
         .from('conversations')
         .select('id')
         .eq('user1_id', currentSeller.id)
         .eq('user2_id', user.id)
         .maybeSingle()
 
+      if (error2 && error2.code !== 'PGRST116') {
+        console.error('[ContactSection] Error checking conversation 2:', error2)
+      }
+
       const existingConv = existingConv1 || existingConv2
 
       if (existingConv) {
+        console.log('[ContactSection] Found existing conversation:', existingConv.id)
         setChatLoading(false)
         router.push(`/messages/${existingConv.id}`)
+        router.refresh() // Force refresh to ensure navigation
         return
       }
+
+      console.log('[ContactSection] Creating new conversation')
 
       // Create new conversation
       const { data: newConv, error: createError } = await supabase
@@ -138,10 +156,11 @@ export default function ContactSection({ phone, seller, postId }: ContactSection
         .single()
 
       if (createError) {
-        console.error('Error creating conversation:', createError)
+        console.error('[ContactSection] Error creating conversation:', createError)
         
         // Check if it's a duplicate error (conversation was created by another request)
-        if (createError.code === '23505') {
+        if (createError.code === '23505' || createError.message?.includes('duplicate')) {
+          console.log('[ContactSection] Duplicate detected, retrying fetch')
           // Try to find the conversation again
           const { data: retryConv1 } = await supabase
             .from('conversations')
@@ -159,27 +178,32 @@ export default function ContactSection({ phone, seller, postId }: ContactSection
 
           const retryConv = retryConv1 || retryConv2
           if (retryConv) {
+            console.log('[ContactSection] Found conversation on retry:', retryConv.id)
             setChatLoading(false)
             router.push(`/messages/${retryConv.id}`)
+            router.refresh()
             return
           }
         }
         
-        alert('Không thể tạo cuộc trò chuyện. Vui lòng thử lại.')
+        alert(`Không thể tạo cuộc trò chuyện: ${createError.message || 'Vui lòng thử lại.'}`)
         setChatLoading(false)
         return
       }
 
       if (newConv && newConv.id) {
+        console.log('[ContactSection] Created new conversation:', newConv.id)
         setChatLoading(false)
         router.push(`/messages/${newConv.id}`)
+        router.refresh() // Force refresh to ensure navigation
       } else {
+        console.error('[ContactSection] Conversation created but no ID returned:', newConv)
         alert('Không thể tạo cuộc trò chuyện. Vui lòng thử lại.')
         setChatLoading(false)
       }
     } catch (err: any) {
-      console.error('Error handling chat click:', err)
-      alert(err?.message || 'Đã xảy ra lỗi. Vui lòng thử lại.')
+      console.error('[ContactSection] Unexpected error handling chat click:', err)
+      alert(`Đã xảy ra lỗi: ${err?.message || 'Vui lòng thử lại.'}`)
       setChatLoading(false)
     }
   }
@@ -215,14 +239,20 @@ export default function ContactSection({ phone, seller, postId }: ContactSection
 
         {/* Chat Button */}
         <button
-          onClick={handleChatClick}
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            handleChatClick()
+          }}
           disabled={!sellerData || !sellerData.id || chatLoading}
-          className="w-full bg-yellow-400 text-gray-900 font-bold py-3 rounded-xl hover:bg-yellow-500 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg"
+          className="w-full bg-yellow-400 text-gray-900 font-bold py-3 rounded-xl hover:bg-yellow-500 active:bg-yellow-600 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg"
           title={
             !sellerData 
               ? 'Không tìm thấy thông tin người bán' 
               : !sellerData.id 
               ? 'Thông tin người bán không hợp lệ'
+              : chatLoading
+              ? 'Đang tải...'
               : 'Nhấn để bắt đầu chat'
           }
         >
