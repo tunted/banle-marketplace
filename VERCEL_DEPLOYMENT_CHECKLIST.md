@@ -182,6 +182,44 @@ console.log('Supabase URL:', process.env.NEXT_PUBLIC_SUPABASE_URL)
 console.log('Supabase Key:', process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.substring(0, 20))
 ```
 
+## Fix Foreign Key Issue (PGRST200 Error)
+
+If you see error `PGRST200: Could not find a relationship between 'messages' and 'user_profiles'`:
+
+**Solution:** Run the fix SQL script:
+1. Go to Supabase Dashboard → SQL Editor
+2. Run `fix-messages-foreign-key.sql` (or copy the SQL below)
+
+```sql
+-- Create foreign key if it doesn't exist
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints 
+    WHERE constraint_name = 'messages_sender_id_fkey' 
+    AND table_name = 'messages'
+  ) THEN
+    ALTER TABLE messages
+    ADD CONSTRAINT messages_sender_id_fkey
+    FOREIGN KEY (sender_id) 
+    REFERENCES user_profiles(id) 
+    ON DELETE CASCADE;
+  END IF;
+END $$;
+```
+
+**Why this happens:**
+- Foreign key constraint wasn't created initially
+- PostgREST needs the constraint to recognize relationships for joins
+- Local might work due to different schema cache state
+
+**Verify it's fixed:**
+```sql
+SELECT constraint_name FROM information_schema.table_constraints 
+WHERE table_name = 'messages' 
+AND constraint_name = 'messages_sender_id_fkey';
+```
+
 ## Quick Fix SQL
 
 If messages aren't saving, run this to check and fix RLS:

@@ -24,6 +24,27 @@ CREATE TABLE IF NOT EXISTS messages (
   CONSTRAINT messages_content_not_empty CHECK (char_length(content) > 0)
 );
 
+-- Step 2.5: Create foreign key from messages.sender_id to user_profiles.id (if user_profiles exists)
+-- This enables PostgREST to automatically recognize the relationship for joins
+DO $$
+BEGIN
+  -- Check if user_profiles table exists and foreign key doesn't exist
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'user_profiles') THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.table_constraints 
+      WHERE constraint_name = 'messages_sender_id_fkey' 
+      AND table_name = 'messages'
+    ) THEN
+      -- Add foreign key constraint to user_profiles
+      ALTER TABLE messages
+      ADD CONSTRAINT messages_sender_id_fkey
+      FOREIGN KEY (sender_id) 
+      REFERENCES user_profiles(id) 
+      ON DELETE CASCADE;
+    END IF;
+  END IF;
+END $$;
+
 -- Step 3: Create user_profiles table if it doesn't exist
 CREATE TABLE IF NOT EXISTS user_profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
