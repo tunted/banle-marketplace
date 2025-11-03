@@ -125,7 +125,7 @@ export default function ConversationPage() {
         // Load messages
         await loadMessages()
 
-        // Subscribe to new messages
+        // Subscribe to new messages with real-time updates
         const channel = supabase
           .channel(`conversation:${conversationId}`)
           .on(
@@ -136,8 +136,26 @@ export default function ConversationPage() {
               table: 'messages',
               filter: `conversation_id=eq.${conversationId}`,
             },
-            () => {
-              loadMessages()
+            (payload) => {
+              // Optimistically update UI with new message
+              if (payload.new) {
+                const newMsg = payload.new as any
+                setMessages((prev) => {
+                  // Check if message already exists to avoid duplicates
+                  if (prev.some((m) => m.id === newMsg.id)) {
+                    return prev
+                  }
+                  return [...prev, {
+                    id: newMsg.id,
+                    sender_id: newMsg.sender_id,
+                    content: newMsg.content,
+                    sent_at: newMsg.sent_at,
+                    sender: null, // Will be loaded with full reload
+                  }]
+                })
+              }
+              // Reload to get full message with sender info
+              setTimeout(() => loadMessages(), 100)
             }
           )
           .subscribe()
@@ -207,7 +225,10 @@ export default function ConversationPage() {
     e.preventDefault()
     if (!newMessage.trim() || sending || !conversation) return
 
+    const messageContent = newMessage.trim()
+    setNewMessage('') // Clear input immediately for better UX
     setSending(true)
+    
     try {
       const {
         data: { user },
@@ -215,22 +236,60 @@ export default function ConversationPage() {
 
       if (!user) return
 
-      const { error: insertError } = await supabase.from('messages').insert({
-        conversation_id: conversationId,
+      // Optimistic update - add message to UI immediately
+      const tempId = `temp-${Date.now()}`
+      const optimisticMessage: Message = {
+        id: tempId,
         sender_id: user.id,
-        content: newMessage.trim(),
-      })
+        content: messageContent,
+        sent_at: new Date().toISOString(),
+        sender: {
+          id: user.id,
+          full_name: null,
+          avatar_url: null,
+        },
+      }
+      
+      setMessages((prev) => [...prev, optimisticMessage])
+
+      const { data: insertedMessage, error: insertError } = await supabase
+        .from('messages')
+        .insert({
+          conversation_id: conversationId,
+          sender_id: user.id,
+          content: messageContent,
+        })
+        .select()
+        .single()
 
       if (insertError) {
         console.error('Error sending message:', insertError)
+        // Remove optimistic message on error
+        setMessages((prev) => prev.filter((m) => m.id !== tempId))
         alert('Không thể gửi tin nhắn. Vui lòng thử lại.')
+        setNewMessage(messageContent) // Restore message
       } else {
-        setNewMessage('')
+        // Replace temp message with real one
+        if (insertedMessage) {
+          setMessages((prev) => {
+            const filtered = prev.filter((m) => m.id !== tempId)
+            return [...filtered, {
+              id: insertedMessage.id,
+              sender_id: insertedMessage.sender_id,
+              content: insertedMessage.content,
+              sent_at: insertedMessage.sent_at,
+              sender: optimisticMessage.sender,
+            }]
+          })
+        }
         inputRef.current?.focus()
       }
     } catch (err) {
       console.error('Error sending message:', err)
+      // Remove optimistic message on error
+      setMessages((prev) => prev.filter((m) => !m.id.startsWith('temp-')))
       alert('Đã xảy ra lỗi. Vui lòng thử lại.')
+      setNewMessage(messageContent) // Restore message
     } finally {
       setSending(false)
     }
@@ -295,65 +354,110 @@ export default function ConversationPage() {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-4xl mx-auto px-4 py-6 space-y-4">
+      <div className="flex-1 overflow-y-auto bg-gray-50">
+        <div className="max-w-4xl mx-auto px-4 py-6">
           {messages.length === 0 ? (
             <div className="text-center text-gray-500 py-12">
-              <p>Chưa có tin nhắn nào. Hãy bắt đầu cuộc trò chuyện!</p>
+              <svg
+                className="w-16 h-16 text-gray-300 mx-auto mb-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                />
+              </svg>
+              <p className="text-lg font-medium mb-2">Chưa có tin nhắn nào</p>
+              <p className="text-sm">Hãy bắt đầu cuộc trò chuyện!</p>
             </div>
           ) : (
-            <MessagesList messages={messages} />
+            <div className="space-y-4">
+              <MessagesList messages={messages} />
+            </div>
           )}
           <div ref={messagesEndRef} />
         </div>
       </div>
 
       {/* Input */}
-      <div className="bg-white border-t border-gray-200">
+      <div className="bg-white border-t border-gray-200 sticky bottom-0">
         <div className="max-w-4xl mx-auto px-4 py-4">
-          <form onSubmit={handleSendMessage} className="flex gap-3">
-            <textarea
-              ref={inputRef}
-              value={newMessage}
-              onChange={(e) => setNewMessage(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  handleSendMessage(e)
-                }
-              }}
-              placeholder="Nhập tin nhắn..."
-              rows={1}
-              className="flex-1 p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none"
-              disabled={sending}
-            />
+          <form onSubmit={handleSendMessage} className="flex gap-3 items-end">
+            <div className="flex-1 relative">
+              <textarea
+                ref={inputRef}
+                value={newMessage}
+                onChange={(e) => {
+                  setNewMessage(e.target.value)
+                  // Auto-resize textarea
+                  if (inputRef.current) {
+                    inputRef.current.style.height = 'auto'
+                    inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 120)}px`
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    handleSendMessage(e)
+                  }
+                }}
+                placeholder="Nhập tin nhắn... (Nhấn Enter để gửi, Shift+Enter để xuống dòng)"
+                rows={1}
+                className="w-full p-3 pr-12 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none min-h-[48px] max-h-[120px]"
+                disabled={sending}
+              />
+              {newMessage.trim() && (
+                <button
+                  type="button"
+                  onClick={() => setNewMessage('')}
+                  className="absolute right-2 bottom-2 text-gray-400 hover:text-gray-600 transition-colors p-1"
+                  aria-label="Xóa tin nhắn"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
             <button
               type="submit"
               disabled={!newMessage.trim() || sending}
-              className="bg-green-500 text-white px-6 py-3 rounded-xl font-medium hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+              className="bg-gradient-to-r from-green-500 to-emerald-600 text-white px-6 py-3 rounded-xl font-medium hover:from-green-600 hover:to-emerald-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-md hover:shadow-lg min-h-[48px]"
             >
               {sending ? (
-                <svg
-                  className="animate-spin h-5 w-5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  />
-                </svg>
+                <>
+                  <svg
+                    className="animate-spin h-5 w-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    />
+                  </svg>
+                  <span>Gửi...</span>
+                </>
               ) : (
-                'Gửi'
+                <>
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  </svg>
+                  <span>Gửi</span>
+                </>
               )}
             </button>
           </form>

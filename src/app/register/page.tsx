@@ -46,7 +46,7 @@ export default function RegisterPage() {
             full_name: fullName || null,
             phone: trimmedPhone,
           },
-          emailRedirectTo: `${window.location.origin}/login`,
+          emailRedirectTo: `${window.location.origin}/login?success=email_verified`,
         },
       })
 

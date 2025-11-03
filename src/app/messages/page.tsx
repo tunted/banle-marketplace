@@ -28,6 +28,7 @@ export default function MessagesPage() {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [user, setUser] = useState<{ id: string } | null>(null)
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -43,6 +44,8 @@ export default function MessagesPage() {
           router.push('/login')
           return
         }
+
+        setUser(user)
 
         // Fetch conversations where user is participant
         const { data: convosData, error: convosError } = await supabase
@@ -95,36 +98,64 @@ export default function MessagesPage() {
         )
 
         setConversations(enrichedConversations)
+        setLoading(false)
+
+        // Subscribe to real-time updates for conversations and messages
+        const conversationsChannel = supabase
+          .channel(`conversations-list-${user.id}`)
+          .on(
+            'postgres_changes',
+            {
+              event: 'INSERT',
+              schema: 'public',
+              table: 'conversations',
+              filter: `user1_id=eq.${user.id}`,
+            },
+            () => {
+              // Reload conversations when new one is created where user is user1
+              loadConversations()
+            }
+          )
+          .on(
+            'postgres_changes',
+            {
+              event: 'INSERT',
+              schema: 'public',
+              table: 'conversations',
+              filter: `user2_id=eq.${user.id}`,
+            },
+            () => {
+              // Reload conversations when new one is created where user is user2
+              loadConversations()
+            }
+          )
+          .on(
+            'postgres_changes',
+            {
+              event: 'INSERT',
+              schema: 'public',
+              table: 'messages',
+            },
+            () => {
+              // Reload conversations when new message arrives to update last_message
+              // This will be filtered by RLS, so only relevant messages trigger
+              loadConversations()
+            }
+          )
+          .subscribe()
+
+        return () => {
+          supabase.removeChannel(conversationsChannel)
+        }
       } catch (err: any) {
         console.error('Error loading conversations:', err)
         setError('Đã xảy ra lỗi. Vui lòng thử lại.')
-      } finally {
         setLoading(false)
       }
     }
 
     loadConversations()
-
-    // Subscribe to new messages for real-time updates
-    const channel = supabase
-      .channel('messages')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-        },
-        () => {
-          loadConversations()
-        }
-      )
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [router])
+  }, [router, searchParams])
 
   // Check if we should open a specific conversation
   const userIdParam = searchParams.get('userId')
@@ -180,10 +211,11 @@ export default function MessagesPage() {
     }
   }
 
-  if (loading) {
+  if (loading || !user) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500 mx-auto mb-2"></div>
           <p className="text-gray-500">Đang tải...</p>
         </div>
       </div>
@@ -216,45 +248,48 @@ export default function MessagesPage() {
                 d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
               />
             </svg>
-            <p className="text-gray-500 mb-4">Bạn chưa có cuộc trò chuyện nào.</p>
+            <p className="text-gray-500 mb-2 text-lg font-medium">Bạn chưa có cuộc trò chuyện nào.</p>
+            <p className="text-gray-400 text-sm">Bắt đầu trò chuyện bằng cách nhấn vào nút Chat trên bài đăng.</p>
           </div>
         ) : (
-          <div className="bg-white rounded-xl shadow-sm divide-y divide-gray-100">
+          <div className="bg-white rounded-xl shadow-sm divide-y divide-gray-100 overflow-hidden">
             {conversations.map((conv) => {
               const displayName = conv.other_user.full_name || 'Người dùng'
               const avatarUrl = getAvatarUrl(conv.other_user.avatar_url)
+              const isOwnLastMessage = conv.last_message?.sender_id === user?.id
 
               return (
                 <Link
                   key={conv.id}
                   href={`/messages/${conv.id}`}
-                  className="block p-4 hover:bg-gray-50 transition-colors"
+                  className="block p-4 hover:bg-gray-50 transition-colors active:bg-gray-100"
                 >
                   <div className="flex items-start gap-3">
                     {/* Avatar */}
-                    <div className="flex-shrink-0">
-                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center overflow-hidden">
+                    <div className="flex-shrink-0 relative">
+                      <div className="w-14 h-14 rounded-full bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center overflow-hidden shadow-sm">
                         {avatarUrl ? (
                           <Image
                             src={avatarUrl}
                             alt={displayName}
-                            width={48}
-                            height={48}
+                            width={56}
+                            height={56}
                             className="w-full h-full object-cover"
                             loading="lazy"
                           />
                         ) : (
-                          <span className="text-white font-semibold text-sm">
+                          <span className="text-white font-semibold text-base">
                             {displayName.charAt(0).toUpperCase()}
                           </span>
                         )}
                       </div>
+                      {/* Online indicator - could be added later */}
                     </div>
 
                     {/* Content */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-1">
-                        <h3 className="font-semibold text-gray-900 truncate">
+                        <h3 className="font-semibold text-gray-900 truncate text-base">
                           {displayName}
                         </h3>
                         {conv.last_message && (
@@ -263,10 +298,13 @@ export default function MessagesPage() {
                           </span>
                         )}
                       </div>
-                      {conv.last_message && (
-                        <p className="text-sm text-gray-600 truncate">
+                      {conv.last_message ? (
+                        <p className={`text-sm truncate ${!isOwnLastMessage ? 'font-medium text-gray-900' : 'text-gray-600'}`}>
+                          {isOwnLastMessage && <span className="text-gray-400">Bạn: </span>}
                           {conv.last_message.content}
                         </p>
+                      ) : (
+                        <p className="text-sm text-gray-400 italic">Chưa có tin nhắn</p>
                       )}
                     </div>
                   </div>

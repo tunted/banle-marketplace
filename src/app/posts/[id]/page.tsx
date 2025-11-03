@@ -42,17 +42,37 @@ async function getPost(id: string): Promise<Post | null> {
 }
 
 async function getSellerProfile(userId: string): Promise<SellerProfile | null> {
-  const { data, error } = await supabase
-    .from('user_profiles')
-    .select('id, full_name, avatar_url')
-    .eq('id', userId)
-    .single()
+  try {
+    const { data, error } = await supabase
+      .from('user_profiles')
+      .select('id, full_name, avatar_url')
+      .eq('id', userId)
+      .maybeSingle() // Use maybeSingle - returns null instead of error when no row found
 
-  if (error || !data) {
+    // maybeSingle should not error on "no rows found", but handle it just in case
+    if (error) {
+      // PGRST116 means "no rows found" - this is expected and should not be logged
+      const errorCode = error.code
+      if (errorCode !== 'PGRST116') {
+        // Only log actual errors (not missing profile)
+        console.error('Error fetching seller profile:', error)
+      }
+      return null
+    }
+
+    if (!data || !data.id) {
+      return null
+    }
+
+    return data
+  } catch (err: any) {
+    // Only log errors that are not "no rows found"
+    const errorCode = err?.code
+    if (errorCode !== 'PGRST116') {
+      console.error('Unexpected error in getSellerProfile:', err)
+    }
     return null
   }
-
-  return data
 }
 
 // Generate static params for top posts
@@ -158,7 +178,17 @@ export default async function PostDetailPage({
   // Fetch seller profile if user_id exists
   let seller: SellerProfile | null = null
   if (post.user_id) {
-    seller = await getSellerProfile(post.user_id)
+    try {
+      seller = await getSellerProfile(post.user_id)
+      // Silently handle missing profiles - this is normal if user hasn't created profile yet
+    } catch (error: any) {
+      // Only log unexpected errors (not the expected PGRST116)
+      const errorCode = error?.code || error?.error?.code
+      if (errorCode && errorCode !== 'PGRST116') {
+        console.error('Error fetching seller profile:', error)
+      }
+      seller = null
+    }
   }
 
 

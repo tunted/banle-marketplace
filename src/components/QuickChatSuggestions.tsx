@@ -49,12 +49,22 @@ export default function QuickChatSuggestions({ postId }: QuickChatSuggestionsPro
       setSending(suggestion)
 
       // Find or create conversation
-      const { data: existingConv } = await supabase
+      // Check both possible combinations
+      const { data: existingConv1 } = await supabase
         .from('conversations')
         .select('id')
-        .or(`and(user1_id.eq.${user.id},user2_id.eq.${postData.user_id}),and(user1_id.eq.${postData.user_id},user2_id.eq.${user.id})`)
-        .single()
+        .eq('user1_id', user.id)
+        .eq('user2_id', postData.user_id)
+        .maybeSingle()
 
+      const { data: existingConv2 } = await supabase
+        .from('conversations')
+        .select('id')
+        .eq('user1_id', postData.user_id)
+        .eq('user2_id', user.id)
+        .maybeSingle()
+
+      const existingConv = existingConv1 || existingConv2
       let conversationId: string
 
       if (existingConv) {
@@ -72,12 +82,43 @@ export default function QuickChatSuggestions({ postId }: QuickChatSuggestionsPro
 
         if (createError) {
           console.error('Error creating conversation:', createError)
+          
+          // If duplicate, try to find it again
+          if (createError.code === '23505') {
+            const { data: retryConv1 } = await supabase
+              .from('conversations')
+              .select('id')
+              .eq('user1_id', user.id)
+              .eq('user2_id', postData.user_id)
+              .maybeSingle()
+
+            const { data: retryConv2 } = await supabase
+              .from('conversations')
+              .select('id')
+              .eq('user1_id', postData.user_id)
+              .eq('user2_id', user.id)
+              .maybeSingle()
+
+            const retryConv = retryConv1 || retryConv2
+            if (retryConv) {
+              conversationId = retryConv.id
+            } else {
+              alert('Không thể tạo cuộc trò chuyện. Vui lòng thử lại.')
+              setSending(null)
+              return
+            }
+          } else {
+            alert('Không thể tạo cuộc trò chuyện. Vui lòng thử lại.')
+            setSending(null)
+            return
+          }
+        } else if (newConv) {
+          conversationId = newConv.id
+        } else {
           alert('Không thể tạo cuộc trò chuyện. Vui lòng thử lại.')
           setSending(null)
           return
         }
-
-        conversationId = newConv.id
       }
 
       // Send message

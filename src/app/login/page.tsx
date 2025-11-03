@@ -19,8 +19,45 @@ export default function LoginPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
-  // Check for success/error messages from query params
+  // Check for success/error messages from query params and handle email verification
   useEffect(() => {
+    // Handle email verification callback from hash
+    async function handleEmailVerification() {
+      try {
+        // Check if URL has hash (email verification callback)
+        if (window.location.hash) {
+          const hashParams = new URLSearchParams(window.location.hash.substring(1))
+          const accessToken = hashParams.get('access_token')
+          const type = hashParams.get('type')
+
+          if (type === 'signup' && accessToken) {
+            // User verified their email via hash, Supabase auto-authenticates
+            // Wait a moment for session to be established
+            await new Promise(resolve => setTimeout(resolve, 500))
+            
+            const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+            
+            if (!sessionError && session) {
+              // User is authenticated, show success and redirect
+              setSuccess('Email đã được xác nhận thành công! Đang chuyển hướng...')
+              // Clear hash from URL
+              window.history.replaceState(null, '', window.location.pathname + window.location.search)
+              setTimeout(() => {
+                router.push('/')
+                router.refresh()
+              }, 1500)
+              return
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Error handling email verification:', err)
+      }
+    }
+
+    handleEmailVerification()
+
+    // Handle query params
     const errorParam = searchParams.get('error')
     const successParam = searchParams.get('success')
 
@@ -30,8 +67,12 @@ export default function LoginPage() {
       setSuccess('Mật khẩu của bạn đã được đặt lại thành công! Vui lòng đăng nhập với mật khẩu mới.')
       // Clear success message after 5 seconds
       setTimeout(() => setSuccess(null), 5000)
+    } else if (successParam === 'email_verified') {
+      setSuccess('Email đã được xác nhận thành công! Bạn có thể đăng nhập ngay.')
+      // Clear success message after 5 seconds
+      setTimeout(() => setSuccess(null), 5000)
     }
-  }, [searchParams])
+  }, [searchParams, router])
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()

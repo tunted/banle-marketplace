@@ -25,21 +25,21 @@ export default function MessageBubble({ message, isOwnMessage }: MessageBubblePr
   const avatarUrl = getAvatarUrl(message.sender?.avatar_url)
 
   return (
-    <div className={`flex gap-2 ${isOwnMessage ? 'flex-row-reverse' : ''}`}>
+    <div className={`flex gap-3 ${isOwnMessage ? 'flex-row-reverse' : ''}`}>
       {/* Avatar */}
       <div className="flex-shrink-0">
-        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center overflow-hidden">
+        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center overflow-hidden shadow-sm">
           {avatarUrl ? (
             <Image
               src={avatarUrl}
               alt={displayName}
-              width={32}
-              height={32}
+              width={40}
+              height={40}
               className="w-full h-full object-cover"
               loading="lazy"
             />
           ) : (
-            <span className="text-white font-semibold text-xs">
+            <span className="text-white font-semibold text-sm">
               {displayName.charAt(0).toUpperCase()}
             </span>
           )}
@@ -47,22 +47,22 @@ export default function MessageBubble({ message, isOwnMessage }: MessageBubblePr
       </div>
 
       {/* Message Content */}
-      <div className={`flex flex-col ${isOwnMessage ? 'items-end' : 'items-start'} max-w-[70%]`}>
+      <div className={`flex flex-col ${isOwnMessage ? 'items-end' : 'items-start'} max-w-[75%] sm:max-w-[65%]`}>
         {!isOwnMessage && (
-          <span className="text-xs text-gray-500 mb-1 px-1">
+          <span className="text-xs text-gray-500 mb-1 px-2 font-medium">
             {displayName}
           </span>
         )}
         <div
-          className={`rounded-2xl px-4 py-2 ${
+          className={`rounded-2xl px-4 py-2.5 shadow-sm ${
             isOwnMessage
-              ? 'bg-green-500 text-white'
-              : 'bg-gray-100 text-gray-900'
+              ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white'
+              : 'bg-white text-gray-900 border border-gray-200'
           }`}
         >
-          <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
+          <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">{message.content}</p>
         </div>
-        <span className="text-xs text-gray-400 mt-1 px-1">
+        <span className="text-xs text-gray-400 mt-1.5 px-2">
           {getTimeAgo(message.sent_at)}
         </span>
       </div>
