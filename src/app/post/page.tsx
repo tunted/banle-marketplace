@@ -179,8 +179,8 @@ export default function PostPage() {
     setUploadError(null)
 
     // Validate total count
-    if (files.length + images.length > 5) {
-      setUploadError('Bạn chỉ có thể tải lên tối đa 5 hình ảnh')
+    if (files.length + images.length > 12) {
+      setUploadError('Bạn chỉ có thể tải lên tối đa 12 hình ảnh')
       if (fileInputRef.current) {
         fileInputRef.current.value = ''
       }
@@ -304,6 +304,12 @@ export default function PostPage() {
       }
       if (!formData.category || !formData.category.trim()) {
         errors.category = 'Vui lòng chọn danh mục'
+      }
+      if (!formData.province_code || !formData.province_code.trim()) {
+        errors.province_code = 'Vui lòng chọn tỉnh/thành phố'
+      }
+      if (!formData.ward_code || !formData.ward_code.trim()) {
+        errors.ward_code = 'Vui lòng chọn quận/huyện/xã'
       }
       if (!formData.location.trim()) {
         errors.location = 'Vui lòng nhập địa chỉ'
@@ -835,9 +841,12 @@ export default function PostPage() {
               value={formData.category}
               onChange={handleInputChange}
               disabled={loadingCategories}
-              className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white ${
+              className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white appearance-none cursor-pointer ${
                 formErrors.category ? 'border-red-300' : 'border-gray-300'
               } ${loadingCategories ? 'opacity-50 cursor-not-allowed' : ''}`}
+              style={{
+                backgroundImage: 'none',
+              }}
             >
               <option value="">
                 {loadingCategories ? 'Đang tải danh mục...' : 'Chọn danh mục'}
@@ -885,20 +894,26 @@ export default function PostPage() {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Khu vực
+              Khu vực <span className="text-red-500">*</span>
             </label>
             <div className="space-y-3">
               <div>
                 <label htmlFor="province" className="block text-xs text-gray-500 mb-1">
-                  Tỉnh/Thành phố
+                  Tỉnh/Thành phố <span className="text-red-500">*</span>
                 </label>
                 <select
                   id="province"
                   name="province_code"
+                  required
                   value={formData.province_code}
                   onChange={handleInputChange}
                   disabled={loadingProvinces}
-                  className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
+                  className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white appearance-none cursor-pointer ${
+                    formErrors.province_code ? 'border-red-300' : 'border-gray-300'
+                  }`}
+                  style={{
+                    backgroundImage: 'none',
+                  }}
                 >
                   <option value="">
                     {loadingProvinces ? 'Đang tải...' : 'Chọn tỉnh/thành phố'}
@@ -909,19 +924,28 @@ export default function PostPage() {
                     </option>
                   ))}
                 </select>
+                {formErrors.province_code && (
+                  <p className="mt-1 text-sm text-red-600">{formErrors.province_code}</p>
+                )}
               </div>
 
               <div>
                 <label htmlFor="ward" className="block text-xs text-gray-500 mb-1">
-                  Quận/Huyện/Xã
+                  Quận/Huyện/Xã <span className="text-red-500">*</span>
                 </label>
                 <select
                   id="ward"
                   name="ward_code"
+                  required
                   value={formData.ward_code}
                   onChange={handleInputChange}
                   disabled={!formData.province_code || loadingWards}
-                  className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white disabled:bg-gray-50"
+                  className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white disabled:bg-gray-50 appearance-none cursor-pointer ${
+                    formErrors.ward_code ? 'border-red-300' : 'border-gray-300'
+                  }`}
+                  style={{
+                    backgroundImage: 'none',
+                  }}
                 >
                   <option value="">
                     {!formData.province_code
@@ -936,6 +960,12 @@ export default function PostPage() {
                     </option>
                   ))}
                 </select>
+                {formErrors.ward_code && (
+                  <p className="mt-1 text-sm text-red-600">{formErrors.ward_code}</p>
+                )}
+                {!formErrors.ward_code && formData.province_code && formData.ward_code && (
+                  <p className="mt-1 text-sm text-green-600">✓ Đã chọn khu vực</p>
+                )}
               </div>
             </div>
           </div>
@@ -978,7 +1008,7 @@ export default function PostPage() {
 
           <div>
             <label htmlFor="images" className="block text-sm font-medium text-gray-700 mb-2">
-              Hình ảnh (Tối đa 5 ảnh, mỗi ảnh tối đa 2MB)
+              Hình ảnh (Tối đa 12 ảnh, mỗi ảnh tối đa 2MB)
             </label>
             <div className="space-y-3">
               <input
@@ -989,18 +1019,18 @@ export default function PostPage() {
                 accept="image/jpeg,image/jpg,image/png,image/webp"
                 multiple
                 onChange={handleImageChange}
-                disabled={loading || images.length >= 5}
+                disabled={loading || images.length >= 12}
                 className="hidden"
               />
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={loading || images.length >= 5}
+                disabled={loading || images.length >= 12}
                 className={`px-4 py-2 bg-green-500 text-white rounded-lg font-medium hover:bg-green-600 transition-colors ${
-                  loading || images.length >= 5 ? 'opacity-50 cursor-not-allowed' : ''
+                  loading || images.length >= 12 ? 'opacity-50 cursor-not-allowed' : ''
                 }`}
               >
-                {images.length >= 5 ? 'Đã đạt giới hạn' : 'Chọn ảnh'}
+                {images.length >= 12 ? 'Đã đạt giới hạn' : 'Chọn ảnh'}
               </button>
               
               {uploadError && (
@@ -1045,7 +1075,7 @@ export default function PostPage() {
               
               {images.length === 0 && !loading && (
                 <p className="text-sm text-gray-500">
-                  Chọn tối đa 5 ảnh (JPG, PNG, WEBP - mỗi ảnh tối đa 2MB)
+                  Chọn tối đa 12 ảnh (JPG, PNG, WEBP - mỗi ảnh tối đa 2MB)
                 </p>
               )}
             </div>

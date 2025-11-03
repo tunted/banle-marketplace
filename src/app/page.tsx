@@ -284,7 +284,10 @@ export default function HomePage() {
               <select
                 value={selectedCategory}
                 onChange={(e) => setSelectedCategory(e.target.value)}
-                className="w-full sm:w-48 p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
+                className="w-full sm:w-48 p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white appearance-none cursor-pointer"
+                style={{
+                  backgroundImage: 'none',
+                }}
                 disabled={loadingCategories}
               >
                 <option value="">Danh mục</option>

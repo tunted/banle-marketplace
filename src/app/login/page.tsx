@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, FormEvent } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, FormEvent, useEffect } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 
@@ -9,8 +9,29 @@ export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false)
+  const [resetEmail, setResetEmail] = useState('')
+  const [resetLoading, setResetLoading] = useState(false)
+  const [resetError, setResetError] = useState<string | null>(null)
+  const [resetSuccess, setResetSuccess] = useState(false)
   const router = useRouter()
+  const searchParams = useSearchParams()
+
+  // Check for success/error messages from query params
+  useEffect(() => {
+    const errorParam = searchParams.get('error')
+    const successParam = searchParams.get('success')
+
+    if (errorParam === 'invalid_reset_link') {
+      setError('Liên kết đặt lại mật khẩu không hợp lệ hoặc đã hết hạn. Vui lòng yêu cầu liên kết mới.')
+    } else if (successParam === 'password_reset') {
+      setSuccess('Mật khẩu của bạn đã được đặt lại thành công! Vui lòng đăng nhập với mật khẩu mới.')
+      // Clear success message after 5 seconds
+      setTimeout(() => setSuccess(null), 5000)
+    }
+  }, [searchParams])
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -74,9 +95,22 @@ export default function LoginPage() {
 
             {/* Password Input */}
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-                Mật khẩu
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+                  Mật khẩu
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowForgotPasswordModal(true)
+                    setResetEmail(email) // Pre-fill with login email if available
+                  }}
+                  className="text-sm text-green-600 hover:text-green-700 hover:underline transition-colors"
+                  disabled={loading}
+                >
+                  Quên mật khẩu?
+                </button>
+              </div>
               <input
                 id="password"
                 type="password"
@@ -89,6 +123,13 @@ export default function LoginPage() {
                 disabled={loading}
               />
             </div>
+
+            {/* Success Message */}
+            {success && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                <p className="text-green-600 text-sm">{success}</p>
+              </div>
+            )}
 
             {/* Error Message */}
             {error && (
@@ -121,7 +162,180 @@ export default function LoginPage() {
           </div>
         </div>
       </div>
+
+      {/* Forgot Password Modal */}
+      {showForgotPasswordModal && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 animate-fadeIn"
+          onClick={() => {
+            if (!resetLoading && !resetSuccess) {
+              setShowForgotPasswordModal(false)
+              setResetError(null)
+              setResetSuccess(false)
+            }
+          }}
+        >
+          <div 
+            className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 animate-slideUp"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {!resetSuccess ? (
+              <>
+                {/* Title */}
+                <h3 className="text-2xl font-bold text-gray-900 mb-2">
+                  Đặt lại mật khẩu
+                </h3>
+                <p className="text-gray-600 text-sm mb-6">
+                  Nhập email của bạn và chúng tôi sẽ gửi cho bạn một liên kết để đặt lại mật khẩu.
+                </p>
+
+                {/* Email Input */}
+                <div className="mb-4">
+                  <label htmlFor="resetEmail" className="block text-sm font-medium text-gray-700 mb-1">
+                    Email
+                  </label>
+                  <input
+                    id="resetEmail"
+                    type="email"
+                    required
+                    value={resetEmail}
+                    onChange={(e) => setResetEmail(e.target.value)}
+                    placeholder="your@email.com"
+                    className="w-full p-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition-colors"
+                    disabled={resetLoading}
+                  />
+                </div>
+
+                {/* Error Message */}
+                {resetError && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+                    <p className="text-red-500 text-sm">{resetError}</p>
+                  </div>
+                )}
+
+                {/* Action Buttons */}
+                <div className="space-y-3">
+                  <button
+                    onClick={handleResetPassword}
+                    disabled={resetLoading || !resetEmail.trim()}
+                    className="w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white font-semibold py-3 rounded-xl hover:from-green-600 hover:to-emerald-700 transition-all shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {resetLoading ? 'Đang gửi...' : 'Gửi liên kết đặt lại mật khẩu'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowForgotPasswordModal(false)
+                      setResetError(null)
+                      setResetEmail('')
+                    }}
+                    disabled={resetLoading}
+                    className="w-full text-gray-600 text-sm hover:text-gray-900 transition-colors disabled:opacity-50"
+                  >
+                    Hủy
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Success Icon */}
+                <div className="flex justify-center mb-4">
+                  <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center">
+                    <svg
+                      className="w-10 h-10 text-green-600"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                      />
+                    </svg>
+                  </div>
+                </div>
+
+                {/* Success Message */}
+                <h3 className="text-2xl font-bold text-gray-900 text-center mb-2">
+                  Email đã được gửi!
+                </h3>
+                <p className="text-gray-600 text-center mb-4">
+                  Chúng tôi đã gửi một liên kết đặt lại mật khẩu đến <strong className="text-gray-900">{resetEmail}</strong>
+                </p>
+                <p className="text-sm text-gray-500 text-center mb-6">
+                  Vui lòng kiểm tra hộp thư đến (và cả thư mục spam) và nhấp vào liên kết để đặt lại mật khẩu của bạn.
+                </p>
+
+                {/* Close Button */}
+                <button
+                  onClick={() => {
+                    setShowForgotPasswordModal(false)
+                    setResetSuccess(false)
+                    setResetEmail('')
+                  }}
+                  className="w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white font-semibold py-3 rounded-xl hover:from-green-600 hover:to-emerald-700 transition-all shadow-md hover:shadow-lg"
+                >
+                  Đã hiểu
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
+
+  async function handleResetPassword() {
+    if (!resetEmail.trim()) {
+      setResetError('Vui lòng nhập email của bạn')
+      return
+    }
+
+    setResetError(null)
+    setResetLoading(true)
+
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(resetEmail.trim(), {
+        redirectTo: `${window.location.origin}/reset-password`,
+      })
+
+      if (error) {
+        setResetError(error.message || 'Không thể gửi email đặt lại mật khẩu. Vui lòng thử lại.')
+        setResetLoading(false)
+        return
+      }
+
+      // Success
+      setResetSuccess(true)
+      setResetLoading(false)
+    } catch (err: any) {
+      setResetError(err?.message || 'Đã xảy ra lỗi. Vui lòng thử lại.')
+      setResetLoading(false)
+    }
+  }
+
+  // Handle ESC key to close modal
+  useEffect(() => {
+    if (!showForgotPasswordModal) return
+
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !resetLoading && !resetSuccess) {
+        setShowForgotPasswordModal(false)
+        setResetError(null)
+        setResetSuccess(false)
+        setResetEmail('')
+      }
+    }
+
+    document.addEventListener('keydown', handleEscape)
+    // Prevent body scroll when modal is open
+    document.body.style.overflow = 'hidden'
+
+    return () => {
+      document.removeEventListener('keydown', handleEscape)
+      document.body.style.overflow = 'unset'
+    }
+  }, [showForgotPasswordModal, resetLoading, resetSuccess])
 }
 
