@@ -21,8 +21,13 @@ interface Ward {
 interface Category {
   id: string
   name: string
-  slug: string
-  sort_order: number | null
+  image_url: string | null
+}
+
+interface Subcategory {
+  id: string
+  name: string
+  category_id: string
 }
 
 export default function PostPage() {
@@ -34,7 +39,8 @@ export default function PostPage() {
     phone: '',
     location: '',
     description: '',
-    category: '',
+    category_id: '',
+    subcategory_id: '',
     province_code: '',
     ward_code: '',
   })
@@ -47,9 +53,11 @@ export default function PostPage() {
   const [provinces, setProvinces] = useState<Province[]>([])
   const [wards, setWards] = useState<Ward[]>([])
   const [categories, setCategories] = useState<Category[]>([])
+  const [subcategories, setSubcategories] = useState<Subcategory[]>([])
   const [loadingProvinces, setLoadingProvinces] = useState(false)
   const [loadingWards, setLoadingWards] = useState(false)
   const [loadingCategories, setLoadingCategories] = useState(false)
+  const [loadingSubcategories, setLoadingSubcategories] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Load categories on mount
@@ -59,23 +67,13 @@ export default function PostPage() {
       try {
         const { data, error } = await supabase
           .from('categories')
-          .select('id, name, slug, sort_order')
-          .order('sort_order', { nullsFirst: false })
+          .select('id, name, image_url')
           .order('name')
 
         if (error) {
           console.error('Error fetching categories:', error)
         } else {
-          // Sort categories: first by sort_order (nulls last), then by name
-          const sortedCategories = (data || []).sort((a, b) => {
-            if (a.sort_order !== null && b.sort_order !== null) {
-              return a.sort_order - b.sort_order
-            }
-            if (a.sort_order !== null) return -1
-            if (b.sort_order !== null) return 1
-            return a.name.localeCompare(b.name)
-          })
-          setCategories(sortedCategories)
+          setCategories(data || [])
         }
       } catch (err) {
         console.error('Error loading categories:', err)
@@ -85,6 +83,41 @@ export default function PostPage() {
     }
     loadCategories()
   }, [])
+
+  // Load subcategories when category is selected
+  useEffect(() => {
+    async function loadSubcategories() {
+      if (!formData.category_id) {
+        setSubcategories([])
+        setFormData((prev) => ({ ...prev, subcategory_id: '' }))
+        return
+      }
+
+      setLoadingSubcategories(true)
+      try {
+        const { data, error } = await supabase
+          .from('subcategories')
+          .select('id, name, category_id')
+          .eq('category_id', formData.category_id)
+          .order('name')
+
+        if (error) {
+          console.error('Error fetching subcategories:', error)
+          setSubcategories([])
+        } else {
+          setSubcategories(data || [])
+          // Reset subcategory_id when category changes
+          setFormData((prev) => ({ ...prev, subcategory_id: '' }))
+        }
+      } catch (err) {
+        console.error('Error loading subcategories:', err)
+        setSubcategories([])
+      } finally {
+        setLoadingSubcategories(false)
+      }
+    }
+    loadSubcategories()
+  }, [formData.category_id])
 
   // Load provinces on mount
   useEffect(() => {
@@ -302,8 +335,11 @@ export default function PostPage() {
           errors.phone = 'Số điện thoại không hợp lệ. Ví dụ: 0912345678, 0987654321 hoặc +84912345678'
         }
       }
-      if (!formData.category || !formData.category.trim()) {
-        errors.category = 'Vui lòng chọn danh mục'
+      if (!formData.category_id || !formData.category_id.trim()) {
+        errors.category_id = 'Vui lòng chọn danh mục'
+      }
+      if (!formData.subcategory_id || !formData.subcategory_id.trim()) {
+        errors.subcategory_id = 'Vui lòng chọn danh mục con'
       }
       if (!formData.province_code || !formData.province_code.trim()) {
         errors.province_code = 'Vui lòng chọn tỉnh/thành phố'
@@ -329,7 +365,8 @@ export default function PostPage() {
         phone: formData.phone.trim(),
         location: formData.location.trim(),
         description: formData.description.trim() || null,
-        category: formData.category.trim(),
+        category_id: formData.category_id.trim(),
+        subcategory_id: formData.subcategory_id.trim(),
         image_url: null, // Will be updated after image upload
         province_code: formData.province_code || null,
         ward_code: formData.ward_code || null,
@@ -831,18 +868,18 @@ export default function PostPage() {
           </div>
 
           <div>
-            <label htmlFor="category" className="block text-sm font-medium text-gray-700 mb-2">
+            <label htmlFor="category_id" className="block text-sm font-medium text-gray-700 mb-2">
               Danh mục <span className="text-red-500">*</span>
             </label>
             <select
-              id="category"
-              name="category"
+              id="category_id"
+              name="category_id"
               required
-              value={formData.category}
+              value={formData.category_id}
               onChange={handleInputChange}
               disabled={loadingCategories}
               className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white appearance-none cursor-pointer ${
-                formErrors.category ? 'border-red-300' : 'border-gray-300'
+                formErrors.category_id ? 'border-red-300' : 'border-gray-300'
               } ${loadingCategories ? 'opacity-50 cursor-not-allowed' : ''}`}
               style={{
                 backgroundImage: 'none',
@@ -852,16 +889,49 @@ export default function PostPage() {
                 {loadingCategories ? 'Đang tải danh mục...' : 'Chọn danh mục'}
               </option>
               {categories.map((category) => (
-                <option key={category.id} value={category.slug}>
+                <option key={category.id} value={category.id}>
                   {category.name}
                 </option>
               ))}
             </select>
-            {formErrors.category && (
-              <p className="mt-1 text-sm text-red-600">{formErrors.category}</p>
+            {formErrors.category_id && (
+              <p className="mt-1 text-sm text-red-600">{formErrors.category_id}</p>
             )}
-            {!formErrors.category && formData.category && (
-              <p className="mt-1 text-sm text-green-600">✓ Đã chọn danh mục</p>
+          </div>
+
+          <div>
+            <label htmlFor="subcategory_id" className="block text-sm font-medium text-gray-700 mb-2">
+              Danh mục con <span className="text-red-500">*</span>
+            </label>
+            <select
+              id="subcategory_id"
+              name="subcategory_id"
+              required
+              value={formData.subcategory_id}
+              onChange={handleInputChange}
+              disabled={!formData.category_id || loadingSubcategories}
+              className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white appearance-none cursor-pointer disabled:bg-gray-50 ${
+                formErrors.subcategory_id ? 'border-red-300' : 'border-gray-300'
+              } ${loadingSubcategories ? 'opacity-50 cursor-not-allowed' : ''}`}
+              style={{
+                backgroundImage: 'none',
+              }}
+            >
+              <option value="">
+                {!formData.category_id
+                  ? 'Chọn danh mục trước'
+                  : loadingSubcategories
+                  ? 'Đang tải danh mục con...'
+                  : 'Chọn danh mục con'}
+              </option>
+              {subcategories.map((subcategory) => (
+                <option key={subcategory.id} value={subcategory.id}>
+                  {subcategory.name}
+                </option>
+              ))}
+            </select>
+            {formErrors.subcategory_id && (
+              <p className="mt-1 text-sm text-red-600">{formErrors.subcategory_id}</p>
             )}
           </div>
 

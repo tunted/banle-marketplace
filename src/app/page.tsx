@@ -1,21 +1,23 @@
 'use client'
 
 import { useState, useEffect, useMemo, useRef } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 import Image from 'next/image'
 import { formatCurrency, getTimeAgo, isNewPost, getPostImageUrl } from '@/lib/utils'
-import CategoryCarousel from '@/components/CategoryCarousel'
+import { useSearchAutocomplete } from '@/hooks/useSearchAutocomplete'
 
-interface Province {
-  code: string
+interface Category {
+  id: string
   name: string
+  image_url: string | null
 }
 
-interface Ward {
-  code: string
+interface Subcategory {
+  id: string
   name: string
-  province_code: string
+  category_id: string
 }
 
 interface Post {
@@ -25,26 +27,26 @@ interface Post {
   location: string
   image_url: string | null
   created_at: string
-  category?: string
-  province_code?: string
-  ward_code?: string
+  category_id: string | null
+  subcategory_id: string | null
 }
 
 async function fetchPosts(
-  provinceCode?: string | null,
-  wardCode?: string | null
+  categoryId?: string | null,
+  subcategoryId?: string | null,
+  searchQuery?: string
 ): Promise<Post[]> {
-    let query = supabase
-      .from('posts')
-      .select('id, title, price, location, image_url, created_at, category, province_code, ward_code')
-      .order('created_at', { ascending: false })
-      .limit(200)
+  let query = supabase
+    .from('posts')
+    .select('id, title, price, location, image_url, created_at, category_id, subcategory_id')
+    .order('created_at', { ascending: false })
+    .limit(200)
 
-  // Apply location filters
-  if (wardCode) {
-    query = query.eq('ward_code', wardCode)
-  } else if (provinceCode) {
-    query = query.eq('province_code', provinceCode)
+  // Apply filters: if subcategory is selected, filter by both category_id and subcategory_id
+  if (subcategoryId && categoryId) {
+    query = query.eq('category_id', categoryId).eq('subcategory_id', subcategoryId)
+  } else if (categoryId) {
+    query = query.eq('category_id', categoryId)
   }
 
   const { data, error } = await query
@@ -54,41 +56,74 @@ async function fetchPosts(
     return []
   }
 
-  return data || []
+  // Apply search filter if needed (client-side for simplicity)
+  let filtered = data || []
+  if (searchQuery && searchQuery.trim()) {
+    const query = searchQuery.toLowerCase()
+    filtered = filtered.filter(
+      (post) =>
+        post.title.toLowerCase().includes(query) ||
+        post.location.toLowerCase().includes(query)
+    )
+  }
+
+  return filtered
 }
 
 export default function HomePage() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  
+  // Get initial state from URL params
+  const urlCategory = searchParams.get('category') || ''
+  const urlSubcategory = searchParams.get('subcategory') || ''
+  const urlQuery = searchParams.get('q') || ''
+
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
-  const [selectedCategory, setSelectedCategory] = useState<string>('')
-  const [selectedProvinceCode, setSelectedProvinceCode] = useState<string | null>(null)
-  const [selectedWardCode, setSelectedWardCode] = useState<string | null>(null)
-  const [locationName, setLocationName] = useState<string>('Chọn khu vực')
-  const [searchQuery, setSearchQuery] = useState<string>('')
-  const [isLocationModalOpen, setIsLocationModalOpen] = useState(false)
-  const [categories, setCategories] = useState<Array<{ id: string; name: string; slug: string; sort_order: number | null }>>([])
-  const [loadingCategories, setLoadingCategories] = useState(true)
-  
-  // Location modal state
-  const [provinces, setProvinces] = useState<Province[]>([])
-  const [wards, setWards] = useState<Ward[]>([])
-  const [modalSelectedProvince, setModalSelectedProvince] = useState<string>('')
-  const [modalSelectedWard, setModalSelectedWard] = useState<string>('')
-  const [loadingProvinces, setLoadingProvinces] = useState(false)
-  const [loadingWards, setLoadingWards] = useState(false)
-  const [locationError, setLocationError] = useState<string | null>(null)
-  const modalRef = useRef<HTMLDivElement>(null)
+  const [postsLoaded, setPostsLoaded] = useState(false)
+  const [categories, setCategories] = useState<Category[]>([])
+  const [subcategories, setSubcategories] = useState<Subcategory[]>([])
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string>(urlCategory)
+  const [selectedSubcategoryId, setSelectedSubcategoryId] = useState<string>(urlSubcategory)
+  const [searchQuery, setSearchQuery] = useState<string>(urlQuery)
+  const [showSubcategories, setShowSubcategories] = useState<boolean>(!!urlCategory && !urlSubcategory)
+  const [currentSubcategoryName, setCurrentSubcategoryName] = useState<string>('')
 
-  // Load categories from database
+  const searchAutocomplete = useSearchAutocomplete()
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const suggestionsRef = useRef<HTMLDivElement>(null)
+
+  // Determine if we're in filtered view (subcategory selected)
+  const isFilteredView = !!selectedSubcategoryId
+
+  // Update URL params when filters change
+  useEffect(() => {
+    const params = new URLSearchParams()
+    if (selectedCategoryId && !selectedSubcategoryId) params.set('category', selectedCategoryId)
+    if (selectedSubcategoryId) {
+      params.set('category', selectedCategoryId)
+      params.set('subcategory', selectedSubcategoryId)
+    }
+    if (searchQuery.trim()) params.set('q', searchQuery.trim())
+
+    const queryString = params.toString()
+    const newUrl = queryString ? `/?${queryString}` : '/'
+    
+    // Only update URL if it's different to avoid infinite loops
+    if (window.location.search !== `?${queryString}`) {
+      router.replace(newUrl, { scroll: false })
+    }
+  }, [selectedCategoryId, selectedSubcategoryId, searchQuery, router])
+
+  // Load categories
   useEffect(() => {
     async function loadCategories() {
-      setLoadingCategories(true)
       try {
         const { data, error } = await supabase
           .from('categories')
-          .select('id, name, slug, sort_order')
-          .order('sort_order', { ascending: true, nullsFirst: false })
-          .order('name', { ascending: true })
+          .select('id, name, image_url')
+          .order('name')
 
         if (error) {
           console.error('Error fetching categories:', error)
@@ -99,371 +134,198 @@ export default function HomePage() {
       } catch (err) {
         console.error('Error loading categories:', err)
         setCategories([])
-      } finally {
-        setLoadingCategories(false)
       }
     }
     loadCategories()
   }, [])
 
+  // Load subcategories when category is selected (but not in filtered view)
+  useEffect(() => {
+    async function loadSubcategories() {
+      if (!selectedCategoryId || isFilteredView) {
+        setSubcategories([])
+        setShowSubcategories(false)
+        return
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from('subcategories')
+          .select('id, name, category_id')
+          .eq('category_id', selectedCategoryId)
+          .order('name')
+
+        if (error) {
+          console.error('Error fetching subcategories:', error)
+          setSubcategories([])
+        } else {
+          setSubcategories(data || [])
+          setShowSubcategories(true)
+        }
+      } catch (err) {
+        console.error('Error loading subcategories:', err)
+        setSubcategories([])
+      }
+    }
+
+    loadSubcategories()
+  }, [selectedCategoryId, isFilteredView])
+
+  // Load posts when filters change
   useEffect(() => {
     async function loadPosts() {
       setLoading(true)
-      const data = await fetchPosts(selectedProvinceCode, selectedWardCode)
+      setPostsLoaded(false)
+      // When subcategory is selected, we need both categoryId and subcategoryId
+      const activeCategoryId = selectedSubcategoryId ? selectedCategoryId : (selectedCategoryId || null)
+      const activeSubcategoryId = selectedSubcategoryId || null
+      const data = await fetchPosts(activeCategoryId, activeSubcategoryId, searchQuery)
       setPosts(data)
       setLoading(false)
+      // Trigger fade-in animation
+      setTimeout(() => setPostsLoaded(true), 50)
     }
     loadPosts()
-  }, [selectedProvinceCode, selectedWardCode])
+  }, [selectedCategoryId, selectedSubcategoryId, searchQuery])
 
-  // Load provinces when modal opens
+  // Handle category click
+  const handleCategoryClick = (categoryId: string) => {
+    if (selectedCategoryId === categoryId && !selectedSubcategoryId) {
+      // Deselect if already selected
+      setSelectedCategoryId('')
+      setSelectedSubcategoryId('')
+      setShowSubcategories(false)
+    } else {
+      setSelectedCategoryId(categoryId)
+      setSelectedSubcategoryId('') // Clear subcategory when changing category
+    }
+  }
+
+  // Handle subcategory click
+  const handleSubcategoryClick = (subcategoryId: string) => {
+    setSelectedSubcategoryId(subcategoryId)
+    // Hide categories and subcategories when entering filtered view
+  }
+
+  // Handle search input with autocomplete
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value
+    setSearchQuery(value)
+    searchAutocomplete.updateSearch(value)
+  }
+
+  // Handle suggestion click
+  const handleSuggestionClick = (subcategory: Subcategory) => {
+    setSelectedCategoryId(subcategory.category_id)
+    setSelectedSubcategoryId(subcategory.id)
+    setSearchQuery('')
+    searchAutocomplete.clearSuggestions()
+    if (searchInputRef.current) {
+      searchInputRef.current.blur()
+    }
+  }
+
+  // Get category and subcategory names for pills
+  const selectedCategory = categories.find((c) => c.id === selectedCategoryId)
+  const selectedSubcategory = subcategories.find((s) => s.id === selectedSubcategoryId) || 
+    (selectedSubcategoryId ? subcategories.find((s) => s.id === selectedSubcategoryId) : null)
+
+  // Load subcategory name when in filtered view
   useEffect(() => {
-    if (isLocationModalOpen) {
-      async function loadProvinces() {
-        setLoadingProvinces(true)
-        setLocationError(null)
+    async function loadSubcategoryName() {
+      if (selectedSubcategoryId) {
         try {
-          const { data, error } = await supabase
-            .from('provinces')
-            .select('code, name')
-            .order('name')
-          
-          if (error) {
-            console.error('Error fetching provinces:', error)
-            setLocationError('Không thể tải danh sách tỉnh/thành phố. Vui lòng kiểm tra kết nối database.')
-            alert('Lỗi: Không thể tải danh sách tỉnh/thành phố. ' + error.message)
-          } else {
-            setProvinces(data || [])
-            if (!data || data.length === 0) {
-              setLocationError('Chưa có dữ liệu tỉnh/thành phố. Vui lòng import dữ liệu vào Supabase.')
+          const { data } = await supabase
+            .from('subcategories')
+            .select('id, name, category_id')
+            .eq('id', selectedSubcategoryId)
+            .single()
+          if (data) {
+            setCurrentSubcategoryName(data.name)
+            if (!selectedSubcategory) {
+              setSubcategories([data])
             }
           }
-        } catch (err: any) {
-          console.error('Error loading provinces:', err)
-          setLocationError('Không thể tải danh sách tỉnh/thành phố. Vui lòng kiểm tra kết nối database.')
-          alert('Lỗi: Không thể tải danh sách tỉnh/thành phố. ' + (err?.message || 'Unknown error'))
-        } finally {
-          setLoadingProvinces(false)
+        } catch (err) {
+          console.error('Error loading subcategory:', err)
         }
+      } else {
+        setCurrentSubcategoryName('')
       }
-      loadProvinces()
-      // Reset modal selections
-      setModalSelectedProvince('')
-      setModalSelectedWard('')
-      setWards([])
     }
-  }, [isLocationModalOpen])
+    loadSubcategoryName()
+  }, [selectedSubcategoryId, selectedSubcategory])
 
-  // Load wards when province is selected
-  useEffect(() => {
-    if (isLocationModalOpen && modalSelectedProvince) {
-      async function loadWards() {
-        setLoadingWards(true)
-        setLocationError(null)
-        try {
-          const { data, error } = await supabase
-            .from('wards')
-            .select('code, name, province_code')
-            .eq('province_code', modalSelectedProvince)
-            .order('name')
-          
-          if (error) {
-            console.error('Error fetching wards:', error)
-            setLocationError('Không thể tải danh sách quận/huyện.')
-            alert('Lỗi: Không thể tải danh sách quận/huyện. ' + error.message)
-          } else {
-            setWards(data || [])
-            setModalSelectedWard('')
-            if (!data || data.length === 0) {
-              setLocationError('Chưa có dữ liệu quận/huyện cho tỉnh này.')
-            }
-          }
-        } catch (err: any) {
-          console.error('Error loading wards:', err)
-          setLocationError('Không thể tải danh sách quận/huyện.')
-          alert('Lỗi: Không thể tải danh sách quận/huyện. ' + (err?.message || 'Unknown error'))
-        } finally {
-          setLoadingWards(false)
-        }
-      }
-      loadWards()
-    } else if (isLocationModalOpen && !modalSelectedProvince) {
-      setWards([])
-      setModalSelectedWard('')
-    }
-  }, [isLocationModalOpen, modalSelectedProvince])
-
-  // Handle click outside modal
+  // Close suggestions when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (modalRef.current && !modalRef.current.contains(event.target as Node)) {
-        setIsLocationModalOpen(false)
+      if (
+        suggestionsRef.current &&
+        searchInputRef.current &&
+        !suggestionsRef.current.contains(event.target as Node) &&
+        !searchInputRef.current.contains(event.target as Node)
+      ) {
+        searchAutocomplete.clearSuggestions()
       }
     }
 
-    if (isLocationModalOpen) {
-      document.addEventListener('mousedown', handleClickOutside)
-      return () => document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [isLocationModalOpen])
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [searchAutocomplete])
 
-  const filteredPosts = useMemo(() => {
-    return posts.filter((post) => {
-      // Category filter
-      if (selectedCategory && post.category !== selectedCategory) {
-        return false
-      }
-
-      // Location filter is already applied at the database level via province_code/ward_code
-      // Additional validation for exact code matching
-      if (selectedWardCode && post.ward_code !== selectedWardCode) {
-        return false
-      }
-      if (selectedProvinceCode && !selectedWardCode && post.province_code !== selectedProvinceCode) {
-        return false
-      }
-
-      // Keyword search
-      if (searchQuery.trim()) {
-        const query = searchQuery.toLowerCase()
-        const titleMatch = post.title.toLowerCase().includes(query)
-        const locationMatch = post.location.toLowerCase().includes(query)
-        if (!titleMatch && !locationMatch) {
-          return false
-        }
-      }
-
-      return true
-    })
-  }, [posts, selectedCategory, locationName, searchQuery, selectedProvinceCode, selectedWardCode])
-
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault()
-    // Filtering happens automatically via useMemo
+  const handleRemoveSubcategoryFilter = () => {
+    setSelectedSubcategoryId('')
+    setSelectedCategoryId('')
+    // Return to full homepage view
   }
 
-  const handleLocationApply = () => {
-    const province = provinces.find((p) => p.code === modalSelectedProvince)
-    const ward = wards.find((w) => w.code === modalSelectedWard)
-
-    let newLocationName = 'Chọn khu vực'
-    
-    if (ward && province) {
-      newLocationName = ward.name
-    } else if (province) {
-      newLocationName = province.name
-    }
-
-    setSelectedProvinceCode(modalSelectedProvince || null)
-    setSelectedWardCode(modalSelectedWard || null)
-    setLocationName(newLocationName)
-    setIsLocationModalOpen(false)
-  }
-
-  const handleLocationClear = () => {
-    setSelectedProvinceCode(null)
-    setSelectedWardCode(null)
-    setLocationName('Chọn khu vực')
-    setIsLocationModalOpen(false)
-  }
+  // Get current subcategory name for filtered view
+  const displaySubcategoryName = currentSubcategoryName || selectedSubcategory?.name || ''
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50">
       <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* Search Bar - Sticky Top with 3D Effect */}
-        <div 
-          className="sticky top-20 z-40 bg-white/90 backdrop-blur-sm rounded-2xl p-4 mb-8 -mt-4 transition-all duration-300"
-          style={{
-            boxShadow: '0 10px 40px rgba(0, 0, 0, 0.1), 0 2px 8px rgba(0, 0, 0, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
-            transform: 'perspective(1000px) rotateX(1deg)',
-          }}
-        >
-          <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-4">
-            {/* Category Dropdown */}
-            <div className="flex-shrink-0">
-              <select
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                className="w-full sm:w-48 p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white appearance-none cursor-pointer"
-                style={{
-                  backgroundImage: 'none',
-                }}
-                disabled={loadingCategories}
-              >
-                <option value="">Danh mục</option>
-                {categories.map((category) => (
-                  <option key={category.id} value={category.slug}>
-                    {category.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-          {/* Search Input */}
-          <div className="flex-1 relative">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Tìm sản phẩm..."
-              className="w-full p-3 pl-10 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent"
-            />
-            <svg
-              className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-              />
-            </svg>
-          </div>
-
-          {/* Location Button */}
-          <div className="flex-shrink-0">
-            <button
-              type="button"
-              onClick={() => setIsLocationModalOpen(true)}
-              className="w-full sm:w-48 p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white text-left hover:bg-gray-50 transition-colors"
-            >
-              {locationName}
-            </button>
-          </div>
-
-          {/* Search Button with 3D Effect */}
-          <button
-            type="submit"
-            className="w-full sm:w-auto px-6 py-3 bg-gradient-to-r from-yellow-400 to-yellow-500 text-gray-900 font-bold rounded-xl hover:from-yellow-500 hover:to-yellow-600 transition-all duration-200 flex-shrink-0 transform hover:scale-105 active:scale-95"
-            style={{
-              boxShadow: '0 4px 14px 0 rgba(234, 179, 8, 0.39), inset 0 -2px 0 rgba(0, 0, 0, 0.1)',
-              textShadow: '0 1px 2px rgba(255, 255, 255, 0.8)',
+        {/* Search Bar with Autocomplete - Always visible */}
+        <div className="sticky top-20 z-40 bg-white/90 backdrop-blur-sm rounded-2xl p-4 mb-8 -mt-4 shadow-lg">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              searchAutocomplete.clearSuggestions()
             }}
+            className="relative"
           >
-            Tìm kiếm
-          </button>
-        </form>
-        </div>
-
-        {/* Dynamic Category Carousel */}
-        <CategoryCarousel
-          selectedCategory={selectedCategory}
-          onCategorySelect={setSelectedCategory}
-        />
-
-        {/* Posts Grid */}
-      {loading ? (
-        <div className="text-center py-16">
-          <p className="text-gray-500">Đang tải...</p>
-        </div>
-      ) : filteredPosts.length === 0 ? (
-        <div className="text-center py-16">
-          <p className="text-gray-500">
-            {searchQuery || selectedCategory || (locationName && locationName !== 'Chọn khu vực')
-              ? 'Không tìm thấy kết quả phù hợp'
-              : 'Chưa có tin đăng nào. Hãy đăng tin đầu tiên!'}
-          </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredPosts.map((post, index) => {
-            // Convert image_url to public URL
-            // Uses the exact image_url value stored in the database without path manipulation
-            const imageUrl = getPostImageUrl(post.image_url)
-
-            const isNew = isNewPost(post.created_at)
-            // Add priority to first 6 images (above fold on most screens)
-            const isPriority = index < 6
-
-            return (
-              <Link
-                key={post.id}
-                href={`/posts/${post.id}`}
-                className="bg-white rounded-2xl overflow-hidden transition-all duration-300 transform hover:scale-[1.02] hover:-translate-y-1"
-                style={{
-                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
-                }}
-              >
-                <div className="aspect-[4/3] relative bg-gray-100 flex items-center justify-center overflow-hidden">
-                  {imageUrl ? (
-                    <Image
-                      src={imageUrl}
-                      alt={post.title}
-                      fill
-                      className="object-cover"
-                      sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-                      priority={isPriority}
-                      loading={isPriority ? 'eager' : 'lazy'}
-                      unoptimized={imageUrl.startsWith('http') && imageUrl.includes('supabase.co')}
-                      onError={(e) => {
-                        // Hide broken image and show SVG fallback
-                        const target = e.target as HTMLImageElement
-                        target.style.display = 'none'
-                      }}
-                    />
-                  ) : (
-                    <svg
-                      className="w-16 h-16 text-gray-400"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
+            <div className="flex gap-4 items-start">
+              {/* In filtered view: show pill to the left of search input */}
+              {isFilteredView && displaySubcategoryName && (
+                <div className="flex items-center flex-shrink-0">
+                  <div className="flex items-center gap-2 bg-gray-100 px-3 py-1.5 rounded-full">
+                    <span className="text-sm font-medium text-gray-700">
+                      {displaySubcategoryName}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleRemoveSubcategoryFilter}
+                      className="text-gray-500 hover:text-gray-700 transition-colors"
+                      aria-label="Xóa bộ lọc"
                     >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
-                      />
-                    </svg>
-                  )}
-                  {isNew && (
-                    <div className="absolute top-3 right-3">
-                      <span className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full">
-                        Mới
-                      </span>
-                    </div>
-                  )}
-                </div>
-                <div className="p-4">
-                  <h3 className="font-semibold text-gray-900 mb-2 line-clamp-2 min-h-[2.5rem]">
-                    {post.title}
-                  </h3>
-                  <p className="text-red-600 font-bold text-lg mb-2">
-                    {formatCurrency(post.price)}
-                  </p>
-                  <div className="flex items-center justify-between mt-2">
-                    <p className="text-gray-500 text-sm truncate">
-                      {post.location}
-                    </p>
-                    <p className="text-gray-500 text-sm ml-2 flex-shrink-0">
-                      {getTimeAgo(post.created_at)}
-                    </p>
+                      ✕
+                    </button>
                   </div>
                 </div>
-              </Link>
-            )
-          })}
-        </div>
-      )}
+              )}
 
-        {/* Location Filter Modal */}
-      {isLocationModalOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div
-            ref={modalRef}
-            className="bg-white rounded-xl shadow-lg max-w-md w-full p-6"
-          >
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-gray-900">Chọn khu vực</h2>
-              <button
-                onClick={() => setIsLocationModalOpen(false)}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
-              >
+              {/* Search Input with Autocomplete */}
+              <div className="flex-1 relative">
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  value={searchQuery}
+                  onChange={handleSearchChange}
+                  placeholder="Tìm kiếm..."
+                  className="w-full p-3 pl-10 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                />
                 <svg
-                  className="w-6 h-6"
+                  className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -472,91 +334,196 @@ export default function HomePage() {
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
+                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
                   />
                 </svg>
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              {locationError && (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                  <p className="text-sm text-yellow-800">{locationError}</p>
-                </div>
-              )}
-
-              {/* Province Selection */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Tỉnh/Thành phố
-                </label>
-                <select
-                  value={modalSelectedProvince}
-                  onChange={(e) => setModalSelectedProvince(e.target.value)}
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
-                  disabled={loadingProvinces}
-                >
-                  <option value="">
-                    {loadingProvinces ? 'Đang tải...' : provinces.length === 0 ? 'Chưa có dữ liệu' : 'Chọn tỉnh/thành phố'}
-                  </option>
-                  {provinces.map((province) => (
-                    <option key={province.code} value={province.code}>
-                      {province.name}
-                    </option>
-                  ))}
-                </select>
+                
+                {/* Autocomplete Suggestions */}
+                {searchAutocomplete.suggestions.length > 0 && (
+                  <div
+                    ref={suggestionsRef}
+                    className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto"
+                  >
+                    {searchAutocomplete.suggestions.map((suggestion) => (
+                      <button
+                        key={suggestion.id}
+                        type="button"
+                        onClick={() => handleSuggestionClick(suggestion)}
+                        className="w-full px-4 py-2 text-left hover:bg-gray-100 transition-colors"
+                      >
+                        {suggestion.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              {/* Ward Selection */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Quận/Huyện/Xã
-                </label>
-                <select
-                  value={modalSelectedWard}
-                  onChange={(e) => setModalSelectedWard(e.target.value)}
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white disabled:bg-gray-100"
-                  disabled={!modalSelectedProvince || loadingWards}
-                >
-                  <option value="">
-                    {!modalSelectedProvince
-                      ? 'Chọn tỉnh/thành phố trước'
-                      : loadingWards
-                      ? 'Đang tải...'
-                      : wards.length === 0
-                      ? 'Chưa có dữ liệu'
-                      : 'Chọn quận/huyện/xã'}
-                  </option>
-                  {wards.map((ward) => (
-                    <option key={ward.code} value={ward.code}>
-                      {ward.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {/* Search Button */}
+              <button
+                type="submit"
+                className="px-6 py-3 bg-gradient-to-r from-yellow-400 to-yellow-500 text-gray-900 font-bold rounded-xl hover:from-yellow-500 hover:to-yellow-600 transition-all"
+              >
+                Tìm kiếm
+              </button>
             </div>
+          </form>
+        </div>
 
-            {/* Action Buttons */}
-            <div className="mt-6 space-y-2">
-              <button
-                onClick={handleLocationApply}
-                disabled={loadingProvinces || loadingWards}
-                className="w-full py-3 bg-yellow-400 text-gray-900 font-semibold rounded-xl hover:bg-yellow-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Áp dụng
-              </button>
-              <button
-                onClick={handleLocationClear}
-                className="w-full py-2 text-gray-600 hover:text-gray-800 transition-colors text-sm"
-              >
-                Xóa bộ lọc
-              </button>
+        {/* Categories Horizontal Scrollable List - Hide in filtered view */}
+        {!isFilteredView && (
+          <div className="mb-8">
+            <div 
+              className="flex gap-x-6 overflow-x-auto pb-4 hide-scrollbar transition-opacity duration-300"
+              style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+            >
+              {categories.map((category) => {
+                const isSelected = selectedCategoryId === category.id
+                return (
+                  <button
+                    key={category.id}
+                    onClick={() => handleCategoryClick(category.id)}
+                    className={`flex-shrink-0 flex flex-col items-center transition-transform hover:scale-[1.02] min-w-[120px] ${
+                      isSelected ? 'ring-2 ring-green-500 rounded-xl p-1' : ''
+                    }`}
+                  >
+                    <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-xl overflow-hidden bg-gray-200 flex items-center justify-center aspect-square mb-2">
+                      {category.image_url ? (
+                        <Image
+                          src={category.image_url}
+                          alt={category.name}
+                          width={112}
+                          height={112}
+                          className="object-cover w-full h-full"
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-gray-300" />
+                      )}
+                    </div>
+                    <p className="text-sm sm:text-base font-semibold text-gray-900 text-center w-24 sm:w-28 leading-tight line-clamp-2 px-1">
+                      {category.name}
+                    </p>
+                  </button>
+                )
+              })}
             </div>
           </div>
+        )}
+
+        {/* Subcategories Vertical List - Hide in filtered view, no heading */}
+        {!isFilteredView && showSubcategories && subcategories.length > 0 && (
+          <div className="mb-8 bg-white rounded-xl p-4 shadow-sm transition-opacity duration-300">
+            <div className="flex flex-col gap-2">
+              {subcategories.map((subcategory) => {
+                const isSelected = selectedSubcategoryId === subcategory.id
+                return (
+                  <button
+                    key={subcategory.id}
+                    onClick={() => handleSubcategoryClick(subcategory.id)}
+                    className={`text-left px-4 py-2 rounded-lg transition-colors ${
+                      isSelected
+                        ? 'bg-green-100 text-green-900 font-semibold'
+                        : 'hover:bg-gray-100 text-gray-700'
+                    }`}
+                  >
+                    {subcategory.name}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Posts Grid */}
+        <div 
+          className={`transition-opacity duration-300 ${postsLoaded ? 'opacity-100' : 'opacity-0'}`}
+        >
+          {loading ? (
+            <div className="text-center py-16">
+              <p className="text-gray-500">Đang tải...</p>
+            </div>
+          ) : posts.length === 0 ? (
+            <div className="text-center py-16">
+              <p className="text-gray-500">
+                {isFilteredView 
+                  ? 'Chưa có bài đăng'
+                  : searchQuery || selectedCategoryId || selectedSubcategoryId
+                  ? 'Không tìm thấy kết quả phù hợp'
+                  : 'Chưa có tin đăng nào. Hãy đăng tin đầu tiên!'}
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {posts.map((post, index) => {
+                const imageUrl = getPostImageUrl(post.image_url)
+                const isNew = isNewPost(post.created_at)
+                const isPriority = index < 6
+
+                return (
+                  <Link
+                    key={post.id}
+                    href={`/posts/${post.id}`}
+                    className="bg-white rounded-2xl overflow-hidden transition-all duration-300 transform hover:scale-[1.02] hover:-translate-y-1 shadow-sm hover:shadow-md"
+                  >
+                    <div className="aspect-[4/3] relative bg-gray-100 flex items-center justify-center overflow-hidden">
+                      {imageUrl ? (
+                        <Image
+                          src={imageUrl}
+                          alt={post.title}
+                          fill
+                          className="object-cover"
+                          sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                          priority={isPriority}
+                          loading={isPriority ? 'eager' : 'lazy'}
+                          unoptimized={imageUrl.startsWith('http') && imageUrl.includes('supabase.co')}
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement
+                            target.style.display = 'none'
+                          }}
+                        />
+                      ) : (
+                        <svg
+                          className="w-16 h-16 text-gray-400"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                          />
+                        </svg>
+                      )}
+                      {isNew && (
+                        <div className="absolute top-3 right-3">
+                          <span className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full">
+                            Mới
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="p-4">
+                      <h3 className="font-semibold text-gray-900 mb-2 line-clamp-2 min-h-[2.5rem]">
+                        {post.title}
+                      </h3>
+                      <p className="text-red-600 font-bold text-lg mb-2">
+                        {formatCurrency(post.price)}
+                      </p>
+                      <div className="flex items-center justify-between mt-2">
+                        <p className="text-gray-500 text-sm truncate">{post.location}</p>
+                        <p className="text-gray-500 text-sm ml-2 flex-shrink-0">
+                          {getTimeAgo(post.created_at)}
+                        </p>
+                      </div>
+                    </div>
+                  </Link>
+                )
+              })}
+            </div>
+          )}
         </div>
-      )}
       </div>
     </div>
   )
 }
-
