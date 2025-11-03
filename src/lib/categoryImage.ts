@@ -54,12 +54,9 @@ export function getCategoryImageUrl(imagePath: string | null | undefined, bucket
   }
 
   try {
-    const { data, error } = supabase.storage.from(bucket).getPublicUrl(normalizedPath)
-    
-    if (error) {
-      console.error('Error getting public URL from Supabase Storage:', error)
-      return null
-    }
+    // getPublicUrl() is synchronous and always returns data (no error property)
+    // It generates a URL even if the file doesn't exist - validation happens at request time
+    const { data } = supabase.storage.from(bucket).getPublicUrl(normalizedPath)
     
     if (!data?.publicUrl) {
       console.warn('No public URL returned for path:', normalizedPath)
