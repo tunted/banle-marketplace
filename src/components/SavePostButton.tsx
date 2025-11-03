@@ -37,12 +37,14 @@ export default function SavePostButton({ postId }: SavePostButtonProps) {
 
         if (error) {
           // Handle various error codes
+          // Check if status exists (some error types may have it)
+          const errorStatus = (error as any).status as number | undefined
           if (
             error.code === 'PGRST116' || 
             error.code === '42P01' || // Table doesn't exist
             error.message?.includes('No rows') ||
             error.message?.includes('Not Acceptable') ||
-            error.status === 406
+            errorStatus === 406
           ) {
             // No rows found or query format issue - post is not saved (this is fine)
             setIsSaved(false)
@@ -90,7 +92,9 @@ export default function SavePostButton({ postId }: SavePostButtonProps) {
         if (error) {
           console.error('Error unsaving post:', error)
           // Check if it's a permission/RLS error
-          if (error.code === '42501' || error.status === 403 || error.status === 406) {
+          // Check if status exists (some error types may have it)
+          const errorStatus = (error as any).status as number | undefined
+          if (error.code === '42501' || errorStatus === 403 || errorStatus === 406) {
             alert('Không có quyền thực hiện thao tác này. Vui lòng đăng nhập lại.')
           } else {
             alert('Không thể bỏ lưu. Vui lòng thử lại.')
@@ -108,10 +112,12 @@ export default function SavePostButton({ postId }: SavePostButtonProps) {
         if (error) {
           console.error('Error saving post:', error)
           // Check if it's a duplicate or permission error
+          // Check if status exists (some error types may have it)
+          const errorStatus = (error as any).status as number | undefined
           if (error.code === '23505') {
             // Unique constraint violation - already saved (shouldn't happen due to state, but handle gracefully)
             setIsSaved(true)
-          } else if (error.code === '42501' || error.status === 403 || error.status === 406) {
+          } else if (error.code === '42501' || errorStatus === 403 || errorStatus === 406) {
             alert('Không có quyền thực hiện thao tác này. Vui lòng đăng nhập lại.')
           } else {
             alert('Không thể lưu bài đăng. Vui lòng thử lại.')
