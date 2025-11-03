@@ -105,11 +105,30 @@ CREATE INDEX IF NOT EXISTS idx_posts_province_district ON posts(province, distri
 ALTER TABLE user_profiles
 ADD COLUMN IF NOT EXISTS phone TEXT;
 
--- 8. Update posts table - remove phone requirement (phone will come from user_profiles)
+-- 8. Add updated_at column to user_profiles (for automatic timestamp updates)
+ALTER TABLE user_profiles
+ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
+-- Create or replace trigger to automatically update updated_at
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+DROP TRIGGER IF EXISTS update_user_profiles_updated_at ON user_profiles;
+CREATE TRIGGER update_user_profiles_updated_at
+  BEFORE UPDATE ON user_profiles
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
+-- 9. Update posts table - remove phone requirement (phone will come from user_profiles)
 -- Note: Keep phone column in posts for backward compatibility, but it's optional now
 -- Posts will use user_id to get phone from user_profiles when needed
 
--- 9. Create storage bucket for CCCD (if not exists via Supabase Dashboard)
+-- 10. Create storage bucket for CCCD (if not exists via Supabase Dashboard)
 -- Run this in Supabase Dashboard > Storage > Create bucket named 'cccd'
 -- Then set public read access and authenticated upload access
 

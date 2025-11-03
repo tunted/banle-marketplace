@@ -3,10 +3,11 @@
 import { useState, FormEvent, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/hooks/useAuth'
 import { validatePhoneNumber } from '@/lib/utils'
 
 export default function RegisterPage() {
+  const { signUp, user } = useAuth()
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
@@ -16,6 +17,13 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false)
   const [showEmailConfirmModal, setShowEmailConfirmModal] = useState(false)
   const router = useRouter()
+
+  // Redirect if already logged in
+  useEffect(() => {
+    if (user) {
+      router.push('/')
+    }
+  }, [user, router])
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -38,21 +46,18 @@ export default function RegisterPage() {
     }
 
     try {
-      const { data, error: authError } = await supabase.auth.signUp({
+      const { error: authError, requiresEmailConfirmation } = await signUp(
         email,
         password,
-        options: {
-          data: {
-            full_name: fullName || null,
-            phone: trimmedPhone,
-          },
-          emailRedirectTo: `${window.location.origin}/login?success=email_verified`,
-        },
-      })
+        {
+          full_name: fullName || undefined,
+          phone: trimmedPhone,
+        }
+      )
 
       if (authError) {
         // Handle specific error messages
-        if (authError.message.includes('already registered')) {
+        if (authError.message.includes('already registered') || authError.message.includes('already exists')) {
           setError('Email này đã được sử dụng. Vui lòng đăng nhập hoặc sử dụng email khác.')
         } else {
           setError(authError.message || 'Đăng ký thất bại. Vui lòng thử lại.')
@@ -61,33 +66,20 @@ export default function RegisterPage() {
         return
       }
 
-      if (data?.user) {
-        // Create user profile record with phone number
-        try {
-          const { error: profileError } = await supabase
-            .from('user_profiles')
-            .insert({
-              id: data.user.id,
-              full_name: fullName || null,
-              phone: trimmedPhone,
-              avatar_url: null,
-            })
-
-          if (profileError) {
-            console.error('Error creating profile:', profileError)
-            // Continue anyway - profile can be updated later
-          }
-        } catch (profileErr) {
-          console.error('Error creating profile:', profileErr)
-          // Continue anyway
-        }
-
-        // Show email confirmation modal instead of redirecting
+      // Success - check if email confirmation is required
+      if (requiresEmailConfirmation) {
+        // Show email confirmation modal
         setShowEmailConfirmModal(true)
         setLoading(false)
+      } else {
+        // User is immediately authenticated (email confirmation disabled)
+        // Redirect to homepage
+        router.push('/')
+        router.refresh()
       }
-    } catch (err: any) {
-      setError(err?.message || 'Đã xảy ra lỗi. Vui lòng thử lại.')
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Đã xảy ra lỗi. Vui lòng thử lại.'
+      setError(errorMessage)
       setLoading(false)
     }
   }
@@ -260,11 +252,10 @@ export default function RegisterPage() {
 
       {/* Email Confirmation Modal */}
       {showEmailConfirmModal && (
-        <div 
+        <div
           className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 animate-fadeIn"
-          onClick={handleModalClose}
         >
-          <div 
+          <div
             className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 animate-slideUp"
             onClick={(e) => e.stopPropagation()}
           >
@@ -288,33 +279,22 @@ export default function RegisterPage() {
             </div>
 
             {/* Title */}
-            <h3 className="text-2xl font-bold text-gray-900 text-center mb-2">
-              Kiểm tra email của bạn
+            <h3 className="text-2xl font-bold text-gray-900 text-center mb-4">
+              Xác minh tài khoản
             </h3>
 
             {/* Message */}
             <p className="text-gray-600 text-center mb-6">
-              Chúng tôi đã gửi một email xác nhận đến <strong className="text-gray-900">{email}</strong>
-            </p>
-            <p className="text-sm text-gray-500 text-center mb-6">
-              Vui lòng kiểm tra hộp thư đến (và cả thư mục spam) và nhấp vào liên kết xác nhận để kích hoạt tài khoản của bạn.
+              Vui lòng kiểm tra email của bạn và nhấn vào liên kết kích hoạt để hoàn tất đăng ký.
             </p>
 
-            {/* Resend Email Button (Optional) */}
-            <div className="space-y-3">
-              <button
-                onClick={handleModalClose}
-                className="w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white font-semibold py-3 rounded-xl hover:from-green-600 hover:to-emerald-700 transition-all shadow-md hover:shadow-lg"
-              >
-                Đã hiểu, đăng nhập ngay
-              </button>
-              <button
-                onClick={handleModalClose}
-                className="w-full text-gray-600 text-sm hover:text-gray-900 transition-colors"
-              >
-                Đóng
-              </button>
-            </div>
+            {/* Single Close Button */}
+            <button
+              onClick={handleModalClose}
+              className="w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white font-semibold py-3 rounded-xl hover:from-green-600 hover:to-emerald-700 transition-all shadow-md hover:shadow-lg"
+            >
+              Đóng
+            </button>
           </div>
         </div>
       )}

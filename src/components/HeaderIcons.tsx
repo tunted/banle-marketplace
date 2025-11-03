@@ -11,18 +11,24 @@ interface HeaderIconsProps {
   isLoggedIn: boolean
 }
 
-export default function HeaderIcons({ user, isLoggedIn: initialIsLoggedIn }: HeaderIconsProps) {
+export default function HeaderIcons({ user, isLoggedIn }: HeaderIconsProps) {
   const [notificationCount, setNotificationCount] = useState(0)
   const [likedCount, setLikedCount] = useState(0)
   const [unreadMessagesCount, setUnreadMessagesCount] = useState(0)
   const [myPostsCount, setMyPostsCount] = useState(0)
-  const [isLoggedIn, setIsLoggedIn] = useState(initialIsLoggedIn)
   const [mounted, setMounted] = useState(false)
   const router = useRouter()
 
   // Load notification count and saved posts count
   useEffect(() => {
-    if (!isLoggedIn) return
+    if (!isLoggedIn) {
+      // Reset counts when not logged in
+      setNotificationCount(0)
+      setLikedCount(0)
+      setUnreadMessagesCount(0)
+      setMyPostsCount(0)
+      return
+    }
 
     let handleMessagesRead: (() => void) | null = null
 
@@ -178,26 +184,10 @@ export default function HeaderIcons({ user, isLoggedIn: initialIsLoggedIn }: Hea
     }
   }, [isLoggedIn])
 
-  // Verify login status on client side
+  // Set mounted state
   useEffect(() => {
     setMounted(true)
-    async function checkSession() {
-      try {
-        const { data: { session } } = await supabase.auth.getSession()
-        setIsLoggedIn(!!session)
-      } catch (error) {
-        console.error('Error checking session:', error)
-      }
-    }
-    checkSession()
-
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setIsLoggedIn(!!session)
-    })
-
-    return () => subscription.unsubscribe()
-  }, [initialIsLoggedIn, user])
+  }, [])
 
   // Show loading state during hydration
   if (!mounted) {
@@ -221,57 +211,7 @@ export default function HeaderIcons({ user, isLoggedIn: initialIsLoggedIn }: Hea
       className="flex items-center gap-1.5 sm:gap-2" 
       data-testid="header-icons"
     >
-      {/* Chat Icon */}
-      <Link
-        href="/messages"
-        className="relative w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 transition-all duration-200 flex items-center justify-center shadow-md hover:shadow-lg hover:scale-105 transform flex-shrink-0"
-        title="Tin nhắn"
-        style={{ 
-          boxShadow: '0 2px 8px 0 rgba(34, 197, 94, 0.3)',
-        }}
-      >
-        <svg
-          className="w-5 h-5 sm:w-6 sm:h-6 text-white"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2.5}
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-          />
-        </svg>
-        <NotificationBadge count={unreadMessagesCount} />
-      </Link>
-
-      {/* Saved Posts Icon */}
-      <Link
-        href="/saved-posts"
-        className="relative w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 transition-all duration-200 flex items-center justify-center shadow-md hover:shadow-lg hover:scale-105 transform flex-shrink-0"
-        title="Tin đã lưu"
-        style={{ 
-          boxShadow: '0 2px 8px 0 rgba(34, 197, 94, 0.3)',
-        }}
-      >
-        <svg
-          className="w-5 h-5 sm:w-6 sm:h-6 text-white"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2.5}
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"
-          />
-        </svg>
-        <NotificationBadge count={likedCount} />
-      </Link>
-
-      {/* Notifications Icon */}
+      {/* Notifications Icon - First */}
       <button
         onClick={() => router.push('/notifications')}
         className="relative w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 transition-all duration-200 flex items-center justify-center shadow-md hover:shadow-lg hover:scale-105 transform flex-shrink-0"
@@ -296,7 +236,57 @@ export default function HeaderIcons({ user, isLoggedIn: initialIsLoggedIn }: Hea
         <NotificationBadge count={notificationCount} className="animate-pulse" />
       </button>
 
-      {/* My Posts Icon */}
+      {/* Chat Icon - Second */}
+      <Link
+        href="/messages"
+        className="relative w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 transition-all duration-200 flex items-center justify-center shadow-md hover:shadow-lg hover:scale-105 transform flex-shrink-0"
+        title="Tin nhắn"
+        style={{ 
+          boxShadow: '0 2px 8px 0 rgba(34, 197, 94, 0.3)',
+        }}
+      >
+        <svg
+          className="w-5 h-5 sm:w-6 sm:h-6 text-white"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2.5}
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+          />
+        </svg>
+        <NotificationBadge count={unreadMessagesCount} />
+      </Link>
+
+      {/* Liked Posts Icon - Third */}
+      <Link
+        href="/saved-posts"
+        className="relative w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 transition-all duration-200 flex items-center justify-center shadow-md hover:shadow-lg hover:scale-105 transform flex-shrink-0"
+        title="Tin đã lưu"
+        style={{ 
+          boxShadow: '0 2px 8px 0 rgba(34, 197, 94, 0.3)',
+        }}
+      >
+        <svg
+          className="w-5 h-5 sm:w-6 sm:h-6 text-white"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2.5}
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"
+          />
+        </svg>
+        <NotificationBadge count={likedCount} />
+      </Link>
+
+      {/* My Posts Icon - Fourth */}
       <Link
         href="/my-posts"
         className="relative w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 transition-all duration-200 flex items-center justify-center shadow-md hover:shadow-lg hover:scale-105 transform flex-shrink-0"

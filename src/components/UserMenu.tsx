@@ -20,7 +20,7 @@ interface UserMenuProps {
 
 export default function UserMenu({ user, initialSession }: UserMenuProps) {
   const [isOpen, setIsOpen] = useState(false)
-  const [isLoggedIn, setIsLoggedIn] = useState(initialSession)
+  const isLoggedIn = initialSession
   const [profile, setProfile] = useState<UserProfile | null>(user)
   const [avatarError, setAvatarError] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -33,22 +33,10 @@ export default function UserMenu({ user, initialSession }: UserMenuProps) {
     }
   }, [user])
 
-  // Listen for auth state changes
+  // Update profile when user prop changes
   useEffect(() => {
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setIsLoggedIn(!!session)
-      if (session?.user) {
-        // Fetch updated profile
-        fetchProfile(session.user.id)
-      } else {
-        setProfile(null)
-      }
-    })
-
-    return () => subscription.unsubscribe()
-  }, [])
+    setProfile(user)
+  }, [user])
 
   async function fetchProfile(userId: string) {
     try {
@@ -183,9 +171,6 @@ export default function UserMenu({ user, initialSession }: UserMenuProps) {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-gray-900 truncate">
                       {displayName}
-                    </p>
-                    <p className="text-xs text-gray-500 truncate">
-                      Tài khoản của bạn
                     </p>
                   </div>
                 </div>

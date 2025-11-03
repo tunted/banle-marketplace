@@ -3,9 +3,10 @@
 import { useState, FormEvent, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/hooks/useAuth'
 
 export default function LoginPage() {
+  const { signIn, user } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -18,6 +19,13 @@ export default function LoginPage() {
   const [resetSuccess, setResetSuccess] = useState(false)
   const router = useRouter()
   const searchParams = useSearchParams()
+
+  // Redirect if already logged in
+  useEffect(() => {
+    if (user) {
+      router.push('/')
+    }
+  }, [user, router])
 
   // Check for success/error messages from query params and handle email verification
   useEffect(() => {
@@ -32,12 +40,10 @@ export default function LoginPage() {
 
           if (type === 'signup' && accessToken) {
             // User verified their email via hash, Supabase auto-authenticates
-            // Wait a moment for session to be established
-            await new Promise(resolve => setTimeout(resolve, 500))
+            // Wait a moment for session to be established and useAuth hook to update
+            await new Promise(resolve => setTimeout(resolve, 1000))
             
-            const { data: { session }, error: sessionError } = await supabase.auth.getSession()
-            
-            if (!sessionError && session) {
+            if (user) {
               // User is authenticated, show success and redirect
               setSuccess('Email đã được xác nhận thành công! Đang chuyển hướng...')
               // Clear hash from URL
@@ -72,7 +78,7 @@ export default function LoginPage() {
       // Clear success message after 5 seconds
       setTimeout(() => setSuccess(null), 5000)
     }
-  }, [searchParams, router])
+  }, [searchParams, router, user])
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -80,10 +86,7 @@ export default function LoginPage() {
     setLoading(true)
 
     try {
-      const { data, error: authError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      })
+      const { error: authError } = await signIn(email, password)
 
       if (authError) {
         setError(authError.message || 'Đăng nhập thất bại. Vui lòng kiểm tra lại email và mật khẩu.')
@@ -91,13 +94,13 @@ export default function LoginPage() {
         return
       }
 
-      if (data?.user) {
-        // Redirect to homepage on success
-        router.push('/')
-        router.refresh()
-      }
-    } catch (err: any) {
-      setError(err?.message || 'Đã xảy ra lỗi. Vui lòng thử lại.')
+      // Success - redirect to homepage
+      // The useAuth hook will handle the state update and router.refresh() is called automatically
+      router.push('/')
+      router.refresh()
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Đã xảy ra lỗi. Vui lòng thử lại.'
+      setError(errorMessage)
       setLoading(false)
     }
   }
@@ -337,6 +340,8 @@ export default function LoginPage() {
     setResetLoading(true)
 
     try {
+      // Import supabase for password reset (not part of useAuth hook)
+      const { supabase } = await import('@/lib/supabase')
       const { error } = await supabase.auth.resetPasswordForEmail(resetEmail.trim(), {
         redirectTo: `${window.location.origin}/reset-password`,
       })
@@ -350,8 +355,9 @@ export default function LoginPage() {
       // Success
       setResetSuccess(true)
       setResetLoading(false)
-    } catch (err: any) {
-      setResetError(err?.message || 'Đã xảy ra lỗi. Vui lòng thử lại.')
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Đã xảy ra lỗi. Vui lòng thử lại.'
+      setResetError(errorMessage)
       setResetLoading(false)
     }
   }
