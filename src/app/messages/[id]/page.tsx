@@ -166,7 +166,7 @@ export default function ConversationPage() {
                     sender_id: newMsg.sender_id,
                     content: newMsg.content,
                     sent_at: newMsg.sent_at,
-                    sender: null, // Will be loaded with full reload
+                    sender: undefined, // Will be loaded with full reload - use undefined instead of null
                   }]
                 })
               }
