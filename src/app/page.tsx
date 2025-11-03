@@ -20,6 +20,17 @@ interface Subcategory {
   category_id: string
 }
 
+interface Province {
+  code: string
+  name: string
+}
+
+interface Ward {
+  code: string
+  name: string
+  province_code: string
+}
+
 interface Post {
   id: string
   title: string
@@ -32,6 +43,69 @@ interface Post {
 }
 
 async function fetchPosts(
+  categoryId?: string | null,
+  subcategoryId?: string | null,
+  searchQuery?: string,
+  province?: string | null,
+  district?: string | null
+): Promise<Post[]> {
+  // Try to fetch with location columns first
+  let query = supabase
+    .from('posts')
+    .select('id, title, price, location, image_url, created_at, category_id, subcategory_id, province, district')
+    .order('created_at', { ascending: false })
+    .limit(200)
+
+  // Apply filters: if subcategory is selected, filter by both category_id and subcategory_id
+  if (subcategoryId && categoryId) {
+    query = query.eq('category_id', categoryId).eq('subcategory_id', subcategoryId)
+  } else if (categoryId) {
+    query = query.eq('category_id', categoryId)
+  }
+
+  // Apply location filters (only if values are provided)
+  // If columns don't exist, the query will error and we'll fall back
+  if (province && province.trim()) {
+    query = query.eq('province', province.trim())
+  }
+  if (district && district.trim()) {
+    query = query.eq('district', district.trim())
+  }
+
+  const { data, error } = await query
+
+  // If error is due to missing columns, fall back to query without location columns
+  if (error) {
+    const isColumnError = error.message?.includes('column') && 
+                         (error.message?.includes('province') || error.message?.includes('district')) &&
+                         error.message?.includes('does not exist')
+    
+    if (isColumnError) {
+      console.warn('Location columns (province, district) not found. Falling back to query without location columns.')
+      console.warn('Please run add-posts-location-columns.sql in Supabase SQL Editor to enable location filtering.')
+      // Retry without location columns
+      return fetchPostsWithoutLocation(categoryId, subcategoryId, searchQuery)
+    }
+    console.error('Error fetching posts:', error)
+    return []
+  }
+
+  // Apply search filter if needed (client-side for simplicity)
+  let filtered = data || []
+  if (searchQuery && searchQuery.trim()) {
+    const query = searchQuery.toLowerCase()
+    filtered = filtered.filter(
+      (post) =>
+        post.title.toLowerCase().includes(query) ||
+        post.location.toLowerCase().includes(query)
+    )
+  }
+
+  return filtered
+}
+
+// Fallback function if location columns don't exist yet
+async function fetchPostsWithoutLocation(
   categoryId?: string | null,
   subcategoryId?: string | null,
   searchQuery?: string
@@ -78,6 +152,8 @@ export default function HomePage() {
   const urlCategory = searchParams.get('category') || ''
   const urlSubcategory = searchParams.get('subcategory') || ''
   const urlQuery = searchParams.get('q') || ''
+  const urlProvince = searchParams.get('province') || ''
+  const urlDistrict = searchParams.get('district') || ''
 
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
@@ -89,6 +165,14 @@ export default function HomePage() {
   const [searchQuery, setSearchQuery] = useState<string>(urlQuery)
   const [showSubcategories, setShowSubcategories] = useState<boolean>(!!urlCategory && !urlSubcategory)
   const [currentSubcategoryName, setCurrentSubcategoryName] = useState<string>('')
+  
+  // Location filter state
+  const [provinces, setProvinces] = useState<Province[]>([])
+  const [wards, setWards] = useState<Ward[]>([])
+  const [selectedProvince, setSelectedProvince] = useState<string>(urlProvince)
+  const [selectedDistrict, setSelectedDistrict] = useState<string>(urlDistrict)
+  const [loadingProvinces, setLoadingProvinces] = useState(false)
+  const [loadingWards, setLoadingWards] = useState(false)
 
   const searchAutocomplete = useSearchAutocomplete()
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -96,6 +180,71 @@ export default function HomePage() {
 
   // Determine if we're in filtered view (subcategory selected)
   const isFilteredView = !!selectedSubcategoryId
+
+  // Load provinces on mount
+  useEffect(() => {
+    async function loadProvinces() {
+      setLoadingProvinces(true)
+      try {
+        const { data, error } = await supabase
+          .from('provinces')
+          .select('code, name')
+          .order('name')
+
+        if (error) {
+          console.error('Error fetching provinces:', error)
+        } else {
+          setProvinces(data || [])
+        }
+      } catch (err) {
+        console.error('Error loading provinces:', err)
+      } finally {
+        setLoadingProvinces(false)
+      }
+    }
+    loadProvinces()
+  }, [])
+
+  // Load wards when province is selected
+  useEffect(() => {
+    async function loadWards() {
+      if (!selectedProvince) {
+        setWards([])
+        // Only reset district if province is being cleared (not on initial load with URL param)
+        if (!urlProvince) {
+          setSelectedDistrict('')
+        }
+        return
+      }
+
+      setLoadingWards(true)
+      try {
+        const { data, error } = await supabase
+          .from('wards')
+          .select('code, name, province_code')
+          .eq('province_code', selectedProvince)
+          .order('name')
+
+        if (error) {
+          console.error('Error fetching wards:', error)
+          setWards([])
+        } else {
+          setWards(data || [])
+          // Only reset district when province changes (not on initial load with URL param)
+          // If district from URL is valid, keep it
+          if (!urlDistrict || !data?.some(w => w.code === urlDistrict)) {
+            setSelectedDistrict('')
+          }
+        }
+      } catch (err) {
+        console.error('Error loading wards:', err)
+        setWards([])
+      } finally {
+        setLoadingWards(false)
+      }
+    }
+    loadWards()
+  }, [selectedProvince, urlProvince, urlDistrict])
 
   // Update URL params when filters change
   useEffect(() => {
@@ -106,6 +255,8 @@ export default function HomePage() {
       params.set('subcategory', selectedSubcategoryId)
     }
     if (searchQuery.trim()) params.set('q', searchQuery.trim())
+    if (selectedProvince) params.set('province', selectedProvince)
+    if (selectedDistrict) params.set('district', selectedDistrict)
 
     const queryString = params.toString()
     const newUrl = queryString ? `/?${queryString}` : '/'
@@ -114,7 +265,7 @@ export default function HomePage() {
     if (window.location.search !== `?${queryString}`) {
       router.replace(newUrl, { scroll: false })
     }
-  }, [selectedCategoryId, selectedSubcategoryId, searchQuery, router])
+  }, [selectedCategoryId, selectedSubcategoryId, searchQuery, selectedProvince, selectedDistrict, router])
 
   // Load categories
   useEffect(() => {
@@ -179,14 +330,25 @@ export default function HomePage() {
       // When subcategory is selected, we need both categoryId and subcategoryId
       const activeCategoryId = selectedSubcategoryId ? selectedCategoryId : (selectedCategoryId || null)
       const activeSubcategoryId = selectedSubcategoryId || null
-      const data = await fetchPosts(activeCategoryId, activeSubcategoryId, searchQuery)
+      
+      // Get province and district names from selected codes
+      const selectedProvinceName = provinces.find(p => p.code === selectedProvince)?.name || null
+      const selectedDistrictName = wards.find(w => w.code === selectedDistrict)?.name || null
+      
+      const data = await fetchPosts(
+        activeCategoryId, 
+        activeSubcategoryId, 
+        searchQuery,
+        selectedProvinceName,
+        selectedDistrictName
+      )
       setPosts(data)
       setLoading(false)
       // Trigger fade-in animation
       setTimeout(() => setPostsLoaded(true), 50)
     }
     loadPosts()
-  }, [selectedCategoryId, selectedSubcategoryId, searchQuery])
+  }, [selectedCategoryId, selectedSubcategoryId, searchQuery, selectedProvince, selectedDistrict, provinces, wards])
 
   // Handle category click
   const handleCategoryClick = (categoryId: string) => {
@@ -276,7 +438,18 @@ export default function HomePage() {
   const handleRemoveSubcategoryFilter = () => {
     setSelectedSubcategoryId('')
     setSelectedCategoryId('')
+    setSelectedProvince('')
+    setSelectedDistrict('')
     // Return to full homepage view
+  }
+
+  const handleProvinceChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setSelectedProvince(e.target.value)
+    setSelectedDistrict('') // Reset district when province changes
+  }
+
+  const handleDistrictChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setSelectedDistrict(e.target.value)
   }
 
   // Get current subcategory name for filtered view
@@ -367,6 +540,70 @@ export default function HomePage() {
               </button>
             </div>
           </form>
+
+          {/* Location Filters - Compact, directly below search bar */}
+          {isFilteredView && (
+            <div className="flex items-center gap-2 mt-2">
+              {/* Province Dropdown */}
+              <select
+                id="province-filter"
+                value={selectedProvince}
+                onChange={handleProvinceChange}
+                disabled={loadingProvinces}
+                className="flex-1 h-9 px-2 py-1 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ backgroundImage: 'none' }}
+                title="Tỉnh/Thành phố"
+              >
+                <option value="">
+                  {loadingProvinces ? 'Đang tải...' : 'Tất cả tỉnh/thành'}
+                </option>
+                {provinces.map((province) => (
+                  <option key={province.code} value={province.code}>
+                    {province.name}
+                  </option>
+                ))}
+              </select>
+
+              {/* District Dropdown */}
+              <select
+                id="district-filter"
+                value={selectedDistrict}
+                onChange={handleDistrictChange}
+                disabled={!selectedProvince || loadingWards}
+                className="flex-1 h-9 px-2 py-1 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white disabled:bg-gray-50 appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ backgroundImage: 'none' }}
+                title="Quận/Huyện"
+              >
+                <option value="">
+                  {!selectedProvince
+                    ? 'Chọn tỉnh trước'
+                    : loadingWards
+                    ? 'Đang tải...'
+                    : 'Tất cả quận/huyện'}
+                </option>
+                {wards.map((ward) => (
+                  <option key={ward.code} value={ward.code}>
+                    {ward.name}
+                  </option>
+                ))}
+              </select>
+
+              {/* Clear Location Filters Button */}
+              {(selectedProvince || selectedDistrict) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedProvince('')
+                    setSelectedDistrict('')
+                  }}
+                  className="h-9 px-3 text-xs bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium whitespace-nowrap flex-shrink-0"
+                  title="Xóa bộ lọc"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Categories Horizontal Scrollable List - Hide in filtered view */}

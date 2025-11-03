@@ -36,7 +36,6 @@ export default function PostPage() {
   const [formData, setFormData] = useState({
     title: '',
     price: '',
-    phone: '',
     location: '',
     description: '',
     category_id: '',
@@ -44,11 +43,11 @@ export default function PostPage() {
     province_code: '',
     ward_code: '',
   })
+  const [userPhone, setUserPhone] = useState<string | null>(null)
   const [images, setImages] = useState<File[]>([])
   const [imagePreviewUrls, setImagePreviewUrls] = useState<string[]>([])
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [rateLimitError, setRateLimitError] = useState<string | null>(null)
-  const [phoneError, setPhoneError] = useState<string | null>(null)
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const [provinces, setProvinces] = useState<Province[]>([])
   const [wards, setWards] = useState<Ward[]>([])
@@ -178,6 +177,36 @@ export default function PostPage() {
     loadWards()
   }, [formData.province_code])
 
+  // Load user phone from profile on mount
+  useEffect(() => {
+    async function loadUserPhone() {
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) {
+          router.push('/login')
+          return
+        }
+
+        const { data: profile } = await supabase
+          .from('user_profiles')
+          .select('phone')
+          .eq('id', user.id)
+          .single()
+
+        if (profile?.phone) {
+          setUserPhone(profile.phone)
+        } else {
+          // If no phone in profile, redirect to profile settings
+          alert('Vui lòng cập nhật số điện thoại trong trang cá nhân trước khi đăng tin.')
+          router.push('/profile')
+        }
+      } catch (error) {
+        console.error('Error loading user phone:', error)
+      }
+    }
+    loadUserPhone()
+  }, [router])
+
   // Check rate limit on mount
   useEffect(() => {
     const rateLimit = checkRateLimit()
@@ -195,16 +224,6 @@ export default function PostPage() {
     const { name, value } = e.target
     setFormData((prev) => ({ ...prev, [name]: value }))
     setFormErrors((prev) => ({ ...prev, [name]: '' }))
-    
-    // Validate phone number in real-time
-    if (name === 'phone') {
-      const trimmedValue = value.trim()
-      if (trimmedValue && !validatePhoneNumber(trimmedValue)) {
-        setPhoneError('Số điện thoại không hợp lệ. Ví dụ: 0912345678, 0987654321 hoặc +84912345678')
-      } else {
-        setPhoneError(null)
-      }
-    }
   }
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -327,13 +346,11 @@ export default function PostPage() {
       if (!formData.price || parseFloat(formData.price) <= 0) {
         errors.price = 'Vui lòng nhập giá hợp lệ'
       }
-      if (!formData.phone || !formData.phone.trim()) {
-        errors.phone = 'Vui lòng nhập số điện thoại'
-      } else {
-        const trimmedPhone = formData.phone.trim()
-        if (!validatePhoneNumber(trimmedPhone)) {
-          errors.phone = 'Số điện thoại không hợp lệ. Ví dụ: 0912345678, 0987654321 hoặc +84912345678'
-        }
+      if (!userPhone || !userPhone.trim()) {
+        alert('Vui lòng cập nhật số điện thoại trong trang cá nhân trước khi đăng tin.')
+        router.push('/profile')
+        setLoading(false)
+        return
       }
       if (!formData.category_id || !formData.category_id.trim()) {
         errors.category_id = 'Vui lòng chọn danh mục'
@@ -357,12 +374,16 @@ export default function PostPage() {
         return
       }
 
+      // Get province and district names
+      const selectedProvince = provinces.find(p => p.code === formData.province_code)
+      const selectedWard = wards.find(w => w.code === formData.ward_code)
+
       // Step 1: Create post first to get the post ID
       const postData = {
         user_id: user.id,
         title: formData.title.trim(),
         price: parseFloat(formData.price),
-        phone: formData.phone.trim(),
+        phone: userPhone, // Use phone from user profile
         location: formData.location.trim(),
         description: formData.description.trim() || null,
         category_id: formData.category_id.trim(),
@@ -370,6 +391,8 @@ export default function PostPage() {
         image_url: null, // Will be updated after image upload
         province_code: formData.province_code || null,
         ward_code: formData.ward_code || null,
+        province: selectedProvince?.name || null,
+        district: selectedWard?.name || null,
       }
 
       console.log('Creating post first to get ID...')
@@ -935,32 +958,18 @@ export default function PostPage() {
             )}
           </div>
 
-          <div>
-            <label htmlFor="phone" className="block text-sm font-medium text-gray-700 mb-2">
-              Số điện thoại <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="tel"
-              id="phone"
-              name="phone"
-              required
-              value={formData.phone}
-              onChange={handleInputChange}
-              className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent ${
-                formErrors.phone || phoneError ? 'border-red-300' : 'border-gray-300'
-              }`}
-              placeholder="Nhập số điện thoại (VD: 0912345678)"
-            />
-            {phoneError && (
-              <p className="mt-1 text-sm text-red-600">{phoneError}</p>
-            )}
-            {formErrors.phone && !phoneError && (
-              <p className="mt-1 text-sm text-red-600">{formErrors.phone}</p>
-            )}
-            {!phoneError && !formErrors.phone && formData.phone && (
-              <p className="mt-1 text-sm text-green-600">✓ Số điện thoại hợp lệ</p>
-            )}
-          </div>
+          {/* Phone removed - using phone from user profile */}
+          {!userPhone && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-4">
+              <p className="text-sm text-yellow-800">
+                Vui lòng cập nhật số điện thoại trong{' '}
+                <Link href="/profile" className="font-semibold underline">
+                  trang cá nhân
+                </Link>{' '}
+                trước khi đăng tin.
+              </p>
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">

@@ -5,12 +5,18 @@ import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
+import UserRating from '@/components/UserRating'
+import CCCDUpload from '@/components/CCCDUpload'
 
 interface UserProfile {
   id: string
   full_name: string | null
   avatar_url: string | null
   phone: string | null
+  rating: number | null
+  cccd_front_url: string | null
+  cccd_back_url: string | null
+  is_verified: boolean | null
 }
 
 type LoadingState = 'loading' | 'no-session' | 'error' | 'success'
@@ -69,7 +75,7 @@ export default function ProfilePage() {
         // Step 3: Fetch user profile
         const { data, error: profileError } = await supabase
           .from('user_profiles')
-          .select('id, full_name, avatar_url, phone')
+          .select('id, full_name, avatar_url, phone, rating, cccd_front_url, cccd_back_url, is_verified')
           .eq('id', session.user.id)
           .single()
 
@@ -88,6 +94,8 @@ export default function ProfilePage() {
                   full_name: session.user.user_metadata?.full_name || null,
                   avatar_url: null,
                   phone: null,
+                  rating: 0.0,
+                  is_verified: false,
                 })
                 .select()
                 .single()
@@ -638,6 +646,25 @@ export default function ProfilePage() {
                   </button>
                 )}
               </div>
+            </div>
+
+            {/* Rating Section */}
+            <div className="mt-6 pt-6 border-t border-gray-200">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Đánh giá</h2>
+              <UserRating 
+                targetUserId={profile.id} 
+                currentRating={profile.rating || 0} 
+              />
+            </div>
+
+            {/* CCCD Verification Section */}
+            <div className="mt-6 pt-6 border-t border-gray-200">
+              <CCCDUpload
+                userId={profile.id}
+                currentFrontUrl={profile.cccd_front_url}
+                currentBackUrl={profile.cccd_back_url}
+                isVerified={profile.is_verified || false}
+              />
             </div>
 
             {/* Back to Home Link */}

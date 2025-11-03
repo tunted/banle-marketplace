@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase'
 import { getAvatarUrl } from '@/lib/utils'
 import QuickChatSuggestions from './QuickChatSuggestions'
 import SavePostButton from './SavePostButton'
+import LoginPrompt from './LoginPrompt'
 
 interface SellerProfile {
   id: string
@@ -24,7 +25,24 @@ export default function ContactSection({ phone, seller, postId }: ContactSection
   const [showFullPhone, setShowFullPhone] = useState(false)
   const [chatLoading, setChatLoading] = useState(false)
   const [sellerData, setSellerData] = useState<SellerProfile | null>(seller)
+  const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const [showLoginPrompt, setShowLoginPrompt] = useState(false)
   const router = useRouter()
+
+  // Check auth status
+  useEffect(() => {
+    async function checkAuth() {
+      const { data: { session } } = await supabase.auth.getSession()
+      setIsLoggedIn(!!session)
+    }
+    checkAuth()
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsLoggedIn(!!session)
+    })
+
+    return () => subscription.unsubscribe()
+  }, [])
 
   // Fetch seller data if not provided (fallback)
   useEffect(() => {
@@ -75,6 +93,13 @@ export default function ContactSection({ phone, seller, postId }: ContactSection
 
   const handleChatClick = async () => {
     if (chatLoading) return
+
+    // Check if user is logged in
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) {
+      setShowLoginPrompt(true)
+      return
+    }
     
     // Use sellerData instead of seller prop
     const currentSeller = sellerData || seller
@@ -215,27 +240,57 @@ export default function ContactSection({ phone, seller, postId }: ContactSection
     return masked + lastFour
   }
 
+  const handleShowPhone = () => {
+    if (!isLoggedIn) {
+      setShowLoginPrompt(true)
+      return
+    }
+    setShowFullPhone(true)
+  }
+
   return (
     <div className="bg-white rounded-xl shadow-sm p-6 sticky top-6">
+      {showLoginPrompt && (
+        <LoginPrompt
+          message="Vui lòng đăng nhập để liên hệ người bán"
+          onClose={() => setShowLoginPrompt(false)}
+        />
+      )}
+      
       <div className="space-y-4">
-        {/* Phone Number */}
-        <div>
-          <p className="text-sm text-gray-600 mb-2">Liên hệ</p>
-          <p className="text-xl font-bold text-gray-900">
-            {showFullPhone ? phone : `Hiện số ${maskPhone(phone)}`}
-          </p>
-          {!showFullPhone && (
+        {/* Phone Number - Hide for non-logged-in users */}
+        {isLoggedIn ? (
+          <div>
+            <p className="text-sm text-gray-600 mb-2">Liên hệ</p>
+            <p className="text-xl font-bold text-gray-900">
+              {showFullPhone ? phone : `Hiện số ${maskPhone(phone)}`}
+            </p>
+            {!showFullPhone && (
+              <button
+                onClick={handleShowPhone}
+                className="text-green-600 hover:text-green-700 text-sm font-medium mt-1"
+              >
+                Hiện số đầy đủ
+              </button>
+            )}
+          </div>
+        ) : (
+          <div>
+            <p className="text-sm text-gray-600 mb-2">Liên hệ</p>
+            <p className="text-xl font-bold text-gray-900 mb-2">
+              {maskPhone(phone)}
+            </p>
             <button
-              onClick={() => setShowFullPhone(true)}
-              className="text-green-600 hover:text-green-700 text-sm font-medium mt-1"
+              onClick={() => setShowLoginPrompt(true)}
+              className="text-green-600 hover:text-green-700 text-sm font-medium underline"
             >
-              Hiện số đầy đủ
+              Đăng nhập để xem số điện thoại
             </button>
-          )}
-        </div>
+          </div>
+        )}
 
-        {/* Save Post Button */}
-        <SavePostButton postId={postId} />
+        {/* Save Post Button - Only for logged-in users */}
+        {isLoggedIn && <SavePostButton postId={postId} />}
 
         {/* Chat Button */}
         <button

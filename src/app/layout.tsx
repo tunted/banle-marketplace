@@ -42,17 +42,33 @@ export default async function RootLayout({
             <div className="flex justify-between items-center h-[104px] gap-4">
               <Logo />
               <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
-                {/* Always render HeaderIcons for debugging - will check login internally */}
+                {/* Always render HeaderIcons - it will handle visibility based on auth state */}
                 <HeaderIcons user={userProfile} isLoggedIn={!!session} />
-                <Link
-                  href="/post"
-                  className="bg-gradient-to-r from-green-500 to-emerald-600 text-white px-4 sm:px-5 py-2 sm:py-2.5 rounded-full font-semibold hover:from-green-600 hover:to-emerald-700 transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-105 transform whitespace-nowrap text-sm sm:text-base"
-                  style={{ 
-                    boxShadow: '0 4px 14px 0 rgba(34, 197, 94, 0.39)',
-                  }}
-                >
-                  + Đăng tin
-                </Link>
+                
+                {/* Show "Đăng tin" button - redirect to login if not logged in */}
+                {session ? (
+                  <Link
+                    href="/post"
+                    className="bg-gradient-to-r from-green-500 to-emerald-600 text-white px-4 sm:px-5 py-2 sm:py-2.5 rounded-full font-semibold hover:from-green-600 hover:to-emerald-700 transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-105 transform whitespace-nowrap text-sm sm:text-base"
+                    style={{ 
+                      boxShadow: '0 4px 14px 0 rgba(34, 197, 94, 0.39)',
+                    }}
+                  >
+                    + Đăng tin
+                  </Link>
+                ) : (
+                  <Link
+                    href="/login"
+                    className="bg-gradient-to-r from-green-500 to-emerald-600 text-white px-4 sm:px-5 py-2 sm:py-2.5 rounded-full font-semibold hover:from-green-600 hover:to-emerald-700 transition-all duration-200 shadow-lg hover:shadow-xl hover:scale-105 transform whitespace-nowrap text-sm sm:text-base"
+                    style={{ 
+                      boxShadow: '0 4px 14px 0 rgba(34, 197, 94, 0.39)',
+                    }}
+                  >
+                    + Đăng tin
+                  </Link>
+                )}
+                
+                {/* Show UserMenu (will show login/register if not logged in) */}
                 <UserMenu user={userProfile} initialSession={!!session} />
               </div>
             </div>

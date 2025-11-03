@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
+import LoginPrompt from './LoginPrompt'
 
 interface SavePostButtonProps {
   postId: string
@@ -11,6 +12,23 @@ export default function SavePostButton({ postId }: SavePostButtonProps) {
   const [isSaved, setIsSaved] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const [showLoginPrompt, setShowLoginPrompt] = useState(false)
+
+  // Check auth status
+  useEffect(() => {
+    async function checkAuth() {
+      const { data: { session } } = await supabase.auth.getSession()
+      setIsLoggedIn(!!session)
+    }
+    checkAuth()
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsLoggedIn(!!session)
+    })
+
+    return () => subscription.unsubscribe()
+  }, [])
 
   useEffect(() => {
     async function checkSavedStatus() {
@@ -69,13 +87,18 @@ export default function SavePostButton({ postId }: SavePostButtonProps) {
   }, [postId])
 
   const handleToggleSave = async () => {
+    if (!isLoggedIn) {
+      setShowLoginPrompt(true)
+      return
+    }
+
     try {
       const {
         data: { user },
       } = await supabase.auth.getUser()
 
       if (!user) {
-        alert('Bạn cần đăng nhập để lưu bài đăng.')
+        setShowLoginPrompt(true)
         return
       }
 
@@ -149,15 +172,22 @@ export default function SavePostButton({ postId }: SavePostButtonProps) {
   }
 
   return (
-    <button
-      onClick={handleToggleSave}
-      disabled={saving}
-      className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
-        isSaved
-          ? 'bg-red-100 text-red-600 hover:bg-red-200'
-          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-      } disabled:opacity-50 disabled:cursor-not-allowed`}
-    >
+    <>
+      {showLoginPrompt && (
+        <LoginPrompt
+          message="Vui lòng đăng nhập để lưu bài đăng"
+          onClose={() => setShowLoginPrompt(false)}
+        />
+      )}
+      <button
+        onClick={handleToggleSave}
+        disabled={saving}
+        className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+          isSaved
+            ? 'bg-red-100 text-red-600 hover:bg-red-200'
+            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+        } disabled:opacity-50 disabled:cursor-not-allowed`}
+      >
       <svg
         className={`w-5 h-5 ${isSaved ? 'fill-current' : ''}`}
         fill={isSaved ? 'currentColor' : 'none'}
@@ -173,6 +203,7 @@ export default function SavePostButton({ postId }: SavePostButtonProps) {
       </svg>
       <span>{isSaved ? 'Đã lưu' : 'Lưu bài đăng'}</span>
     </button>
+    </>
   )
 }
 

@@ -24,46 +24,63 @@ export default function NotificationsPage() {
           return
         }
 
-        // Fetch notifications with related data
-        const { data, error: notifError } = await supabase
+        // Fetch notifications
+        const { data: notificationsData, error: notifError } = await supabase
           .from('notifications')
-          .select(`
-            id,
-            type,
-            from_user_id,
-            post_id,
-            is_read,
-            created_at,
-            from_user:user_profiles!notifications_from_user_id_fkey (
-              id,
-              full_name,
-              avatar_url
-            ),
-            post:posts!notifications_post_id_fkey (
-              id,
-              title
-            )
-          `)
+          .select('id, type, from_user_id, post_id, is_read, created_at')
           .eq('user_id', user.id)
           .order('created_at', { ascending: false })
 
         if (notifError) {
           console.error('Error fetching notifications:', notifError)
           setError('Không thể tải thông báo.')
-        } else {
-          // Transform data
-          const transformed: Notification[] = (data || []).map((item: any) => ({
-            id: item.id,
-            type: item.type,
-            from_user_id: item.from_user_id,
-            post_id: item.post_id,
-            is_read: item.is_read,
-            created_at: item.created_at,
-            from_user: item.from_user || null,
-            post: item.post || null,
-          }))
-          setNotifications(transformed)
+          setLoading(false)
+          return
         }
+
+        if (!notificationsData || notificationsData.length === 0) {
+          setNotifications([])
+          setLoading(false)
+          return
+        }
+
+        // Fetch related user_profiles and posts separately
+        const userIds = [...new Set(notificationsData.map(n => n.from_user_id).filter(Boolean))]
+        const postIds = [...new Set(notificationsData.map(n => n.post_id).filter(Boolean))]
+
+        // Fetch user profiles
+        const { data: userProfiles } = await supabase
+          .from('user_profiles')
+          .select('id, full_name, avatar_url')
+          .in('id', userIds)
+
+        // Fetch posts
+        const { data: postsData } = await supabase
+          .from('posts')
+          .select('id, title')
+          .in('id', postIds)
+
+        // Create lookup maps
+        const userProfilesMap = new Map(
+          (userProfiles || []).map(profile => [profile.id, profile])
+        )
+        const postsMap = new Map(
+          (postsData || []).map(post => [post.id, post])
+        )
+
+        // Transform data with related entities
+        const transformed: Notification[] = notificationsData.map((item) => ({
+          id: item.id,
+          type: item.type,
+          from_user_id: item.from_user_id,
+          post_id: item.post_id,
+          is_read: item.is_read,
+          created_at: item.created_at,
+          from_user: item.from_user_id ? userProfilesMap.get(item.from_user_id) || null : null,
+          post: item.post_id ? postsMap.get(item.post_id) || null : null,
+        }))
+
+        setNotifications(transformed)
       } catch (err: any) {
         console.error('Error loading notifications:', err)
         setError('Đã xảy ra lỗi. Vui lòng thử lại.')
