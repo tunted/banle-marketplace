@@ -1,20 +1,20 @@
 import { supabase } from '@/lib/supabase'
 import { notFound } from 'next/navigation'
-import { formatCurrency, getTimeAgo } from '@/lib/utils'
+import { formatCurrency, getTimeAgo, getPostImageUrl } from '@/lib/utils'
 import Link from 'next/link'
 import ImageCarousel from '@/components/ImageCarousel'
-import ListingDetails from '@/components/ListingDetails'
+import PostDetails from '@/components/PostDetails'
 import ContactSection from '@/components/ContactSection'
 import MobileContactButton from '@/components/MobileContactButton'
 
-interface Listing {
+interface Post {
   id: string
   title: string
   price: number
   location: string
   description: string | null
   phone: string
-  images: string[] | null
+  image_url: string | null
   created_at: string
   user_id: string | null
   province_code: string | null
@@ -27,10 +27,10 @@ interface SellerProfile {
   avatar_url: string | null
 }
 
-async function getListing(id: string): Promise<Listing | null> {
+async function getPost(id: string): Promise<Post | null> {
   const { data, error } = await supabase
-    .from('listings')
-    .select('id, title, price, location, description, phone, images, created_at, user_id, province_code, ward_code')
+    .from('posts')
+    .select('id, title, price, location, description, phone, image_url, created_at, user_id, province_code, ward_code')
     .eq('id', id)
     .single()
 
@@ -55,71 +55,101 @@ async function getSellerProfile(userId: string): Promise<SellerProfile | null> {
   return data
 }
 
-// Generate static params for top listings
+// Generate static params for top posts
 export async function generateStaticParams() {
   const { data } = await supabase
-    .from('listings')
+    .from('posts')
     .select('id')
     .order('created_at', { ascending: false })
     .limit(50)
 
   if (!data) return []
 
-  return data.map((listing) => ({
-    id: listing.id,
+  return data.map((post) => ({
+    id: post.id,
   }))
 }
 
 // Enable ISR: revalidate every 60 seconds
 export const revalidate = 60
 
-export default async function ListingDetailPage({
+export default async function PostDetailPage({
   params,
 }: {
   params: { id: string }
 }) {
-  const listing = await getListing(params.id)
+  const post = await getPost(params.id)
 
-  if (!listing) {
+  if (!post) {
     notFound()
   }
 
-  // Parse images array
-  let imagesArray: string[] = []
-  if (listing.images) {
-    if (Array.isArray(listing.images)) {
-      imagesArray = listing.images
-    } else if (typeof listing.images === 'string') {
+  // Get all images for this post
+  // New format: images are stored in {postId}/ subfolder (e.g., "{postId}/filename.jpg")
+  // The image_url field contains the path like "{postId}/filename.jpg"
+  // We need to convert this path to a public URL
+  let validImages: string[] = []
+  
+  if (post.image_url) {
+    // Convert the stored filename to public URL
+    // image_url format: "filename.jpg" (just the filename)
+    // getPostImageUrl() reconstructs path as "posts/{postId}/filename.jpg" and generates public URL
+    const imageUrl = getPostImageUrl(post.id, post.image_url)
+    
+    if (imageUrl) {
+      validImages = [imageUrl]
+      
+      // Also try to list all images in the post's folder (in case there are multiple images)
       try {
-        const parsed = JSON.parse(listing.images)
-        if (Array.isArray(parsed)) {
-          imagesArray = parsed
+        const { data: files, error } = await supabase.storage
+          .from('posts')
+          .list(post.id, {
+            limit: 10,
+            offset: 0,
+            sortBy: { column: 'name', order: 'asc' },
+          })
+
+        if (!error && files && files.length > 0) {
+          // Get public URLs for all image files in the folder
+          const folderImages = files
+            .filter((file) => {
+              const fileName = file.name.toLowerCase()
+              return (
+                fileName.endsWith('.jpg') ||
+                fileName.endsWith('.jpeg') ||
+                fileName.endsWith('.png') ||
+                fileName.endsWith('.webp')
+              )
+            })
+            .map((file) => {
+              // file.name is just the filename, post.id is the folder
+              // getPostImageUrl() reconstructs path as "{postId}/{filename}"
+              return getPostImageUrl(post.id, file.name)
+            })
+            .filter((url): url is string => url !== null && url !== '')
+
+          // Combine all images, remove duplicates, ensure first image from image_url is first
+          if (folderImages.length > 0) {
+            const allImages = [imageUrl, ...folderImages.filter((url) => url !== imageUrl)]
+            validImages = [...new Set(allImages)] // Remove duplicates
+          }
         }
-      } catch {
-        imagesArray = []
+      } catch (error) {
+        console.warn('Error listing additional images from folder:', error)
+        // Continue with just the image_url converted to URL
       }
     }
   }
 
-  // Filter to only valid image URLs
-  const validImages = imagesArray.filter((img) => {
-    if (!img || typeof img !== 'string') return false
-    return (
-      img.startsWith('http://') ||
-      img.startsWith('https://') ||
-      img.startsWith('/')
-    )
-  })
-
   // Fetch seller profile if user_id exists
   let seller: SellerProfile | null = null
-  if (listing.user_id) {
-    seller = await getSellerProfile(listing.user_id)
+  if (post.user_id) {
+    seller = await getSellerProfile(post.user_id)
   }
 
 
   // Calculate price range for market price slider (mock calculation)
-  const priceInTr = listing.price / 1000000 // Convert to triệu (millions)
+  const priceInTr = post.price / 1000000 // Convert to triệu (millions)
   const minPrice = Math.max(0.5, priceInTr - 0.5) // Min range
   const maxPrice = priceInTr + 0.5 // Max range
   const currentPricePosition = ((priceInTr - minPrice) / (maxPrice - minPrice)) * 100
@@ -145,7 +175,7 @@ export default async function ListingDetailPage({
           <div className="lg:col-span-2 space-y-6">
             {/* Image Carousel */}
             <div className="bg-white rounded-xl shadow-sm p-6">
-              <ImageCarousel images={validImages} title={listing.title} />
+              <ImageCarousel images={validImages} title={post.title} postId={post.id} />
             </div>
 
             {/* Product Info */}
@@ -153,7 +183,7 @@ export default async function ListingDetailPage({
               <div className="space-y-4">
                 <div>
                   <h1 className="text-3xl font-bold text-gray-900 mb-3">
-                    {listing.title}
+                    {post.title}
                   </h1>
                   <div className="flex items-center gap-2 mb-4">
                     <span className="bg-red-50 text-red-600 text-xs font-medium px-2 py-1 rounded">
@@ -167,7 +197,7 @@ export default async function ListingDetailPage({
 
                 <div className="pb-4 border-b border-gray-200">
                   <p className="text-4xl font-bold text-red-600 mb-4">
-                    {formatCurrency(listing.price)}
+                    {formatCurrency(post.price)}
                   </p>
                 </div>
 
@@ -200,7 +230,7 @@ export default async function ListingDetailPage({
                 <div className="space-y-2 text-gray-700">
                   <div className="flex items-start gap-2">
                     <span className="text-xl">📍</span>
-                    <span>{listing.location}</span>
+                    <span>{post.location}</span>
                   </div>
                   <div className="flex items-center gap-2 text-sm text-gray-500">
                     <svg
@@ -216,33 +246,34 @@ export default async function ListingDetailPage({
                         d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
                       />
                     </svg>
-                    <span>Cập nhật {getTimeAgo(listing.created_at)}</span>
+                    <span>Cập nhật {getTimeAgo(post.created_at)}</span>
                   </div>
                 </div>
               </div>
             </div>
 
             {/* Description and Comments */}
-            <ListingDetails
-              description={listing.description}
+            <PostDetails
+              description={post.description}
               comments={[]}
-              listingId={listing.id}
+              postId={post.id}
             />
           </div>
 
           {/* Right Column - Contact and Seller Info */}
           <div className="space-y-6">
             <ContactSection
-              phone={listing.phone}
+              phone={post.phone}
               seller={seller}
-              listingId={listing.id}
+              postId={post.id}
             />
           </div>
         </div>
       </div>
 
       {/* Mobile Contact Button */}
-      <MobileContactButton phone={listing.phone} />
+      <MobileContactButton phone={post.phone} />
     </div>
   )
 }
+

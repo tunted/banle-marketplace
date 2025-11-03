@@ -196,14 +196,33 @@ export default function ProfilePage() {
 
       // Step 3: Generate unique filename: ${userId}_${Date.now()}.${extension}
       const fileName = `${user.id}_${Date.now()}.${fileExt}`
-      const filePath = fileName // Upload to root of avatars bucket
+      // Upload to subfolder: avatars/
+      const filePath = `avatars/${fileName}`
 
       // Step 4: Delete old avatar if exists (optional cleanup)
       if (profile?.avatar_url) {
         try {
-          const oldFileName = profile.avatar_url.split('/').pop()?.split('?')[0]
-          if (oldFileName) {
-            await supabase.storage.from('avatars').remove([oldFileName])
+          // Extract path from URL - could be full URL or just path
+          let oldPath = profile.avatar_url
+          
+          // If it's a full URL, extract just the path part after the bucket name
+          if (oldPath.includes('/storage/v1/object/public/avatars/')) {
+            oldPath = oldPath.split('/storage/v1/object/public/avatars/')[1]?.split('?')[0] || ''
+          } else if (oldPath.startsWith('http')) {
+            // Try to extract from any URL format
+            const urlParts = oldPath.split('/avatars/')
+            if (urlParts.length > 1) {
+              oldPath = `avatars/${urlParts[1].split('?')[0]}`
+            }
+          }
+          
+          // Ensure it starts with avatars/ subfolder
+          if (oldPath && !oldPath.startsWith('avatars/')) {
+            oldPath = `avatars/${oldPath}`
+          }
+          
+          if (oldPath) {
+            await supabase.storage.from('avatars').remove([oldPath])
             // Ignore errors - old file might not exist
           }
         } catch (cleanupError) {
@@ -252,9 +271,11 @@ export default function ProfilePage() {
       }
 
       // Step 6: Get public URL after successful upload
+      // Store the path (avatars/filename.jpg) not full URL for database
+      const avatarPath = filePath // Already includes 'avatars/' subfolder
       const {
         data: { publicUrl },
-      } = supabase.storage.from('avatars').getPublicUrl(filePath)
+      } = supabase.storage.from('avatars').getPublicUrl(avatarPath)
 
       if (!publicUrl) {
         setError('Không thể tạo đường dẫn ảnh. Vui lòng thử lại.')
@@ -267,10 +288,11 @@ export default function ProfilePage() {
         return
       }
 
-      // Step 7: Update profile with new avatar URL
+      // Step 7: Update profile with avatar path (not full URL)
+      // Store the path (avatars/filename.jpg) in database
       const { error: updateError } = await supabase
         .from('user_profiles')
-        .update({ avatar_url: publicUrl })
+        .update({ avatar_url: avatarPath }) // Store path instead of full URL
         .eq('id', user.id)
 
       if (updateError) {
@@ -480,6 +502,7 @@ export default function ProfilePage() {
                     width={80}
                     height={80}
                     className="w-full h-full object-cover"
+                    loading="eager"
                     onError={() => {
                       setAvatarError(true)
                     }}

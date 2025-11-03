@@ -1,22 +1,20 @@
 'use client'
 
-import Link from 'next/link'
+import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 
 export default function LikedPostsPage() {
+  const router = useRouter()
+
+  useEffect(() => {
+    // Redirect to saved-posts
+    router.replace('/saved-posts')
+  }, [router])
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 py-8 px-4">
-      <div className="max-w-4xl mx-auto">
-        <div className="bg-white rounded-2xl shadow-lg p-8 text-center">
-          <div className="text-6xl mb-4">❤️</div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-4">Tin đã lưu</h1>
-          <p className="text-gray-600 mb-6">Tính năng lưu tin yêu thích đang được phát triển. Sẽ có sớm!</p>
-          <Link
-            href="/"
-            className="inline-block bg-gradient-to-r from-green-500 to-emerald-600 text-white font-semibold py-3 px-6 rounded-xl hover:from-green-600 hover:to-emerald-700 transition-all"
-          >
-            ← Về trang chủ
-          </Link>
-        </div>
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="text-center">
+        <p className="text-gray-500">Đang chuyển hướng...</p>
       </div>
     </div>
   )

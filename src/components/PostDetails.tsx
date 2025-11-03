@@ -2,13 +2,13 @@
 
 import { useState } from 'react'
 
-interface ListingDetailsProps {
+interface PostDetailsProps {
   description: string | null
   comments: Array<{ id: string; content: string; created_at: string; user_name: string }>
-  listingId: string
+  postId: string
 }
 
-export default function ListingDetails({ description, comments: initialComments, listingId }: ListingDetailsProps) {
+export default function PostDetails({ description, comments: initialComments, postId }: PostDetailsProps) {
   const [expanded, setExpanded] = useState(false)
   const [comments, setComments] = useState(initialComments || [])
   const [newComment, setNewComment] = useState('')

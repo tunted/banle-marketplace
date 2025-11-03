@@ -1,3 +1,5 @@
+import { supabase } from '@/lib/supabase'
+
 /**
  * Format number as Vietnamese currency (e.g., 12500000 -> "12.500.000 đ")
  */
@@ -6,6 +8,91 @@ export function formatCurrency(amount: number): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(amount) + ' đ'
+}
+
+/**
+ * Get public URL from Supabase Storage for posts
+ * 
+ * This function reconstructs the full storage path and generates a public URL.
+ * 
+ * Database format: image_url stores only the filename (e.g., "image.jpg")
+ * Storage location: posts/{postId}/{filename}
+ * 
+ * @param postId - The post ID (UUID)
+ * @param imageUrl - The filename stored in database (e.g., "image.jpg") or null
+ * @returns Public URL string or null if path is invalid
+ */
+export function getPostImageUrl(postId: string | null | undefined, imageUrl: string | null | undefined): string | null {
+  // Handle null/undefined - return null (components will show SVG fallback)
+  if (!postId || !imageUrl) {
+    return null
+  }
+  
+  // If imageUrl is already a full URL, return it (backward compatibility)
+  if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+    return imageUrl
+  }
+  
+  // If it's a relative path starting with /, return as-is (public asset)
+  if (imageUrl.startsWith('/')) {
+    return imageUrl
+  }
+  
+  // Handle legacy format: "posts/{postId}/filename.jpg" (backward compatibility)
+  // Extract filename if it contains path separators
+  let filename = imageUrl
+  if (imageUrl.includes('/')) {
+    const parts = imageUrl.split('/')
+    filename = parts[parts.length - 1]
+  }
+  
+  // Reconstruct full storage path: "{postId}/{filename}"
+  // getPublicUrl() expects path within bucket (without "posts/" prefix)
+  const storagePath = `${postId}/${filename}`
+  
+  // Use getPublicUrl() with the path within the bucket
+  try {
+    const { data } = supabase.storage.from('posts').getPublicUrl(storagePath)
+    
+    if (data?.publicUrl) {
+      return data.publicUrl
+    }
+    
+    // Return null if getPublicUrl fails (components will show SVG fallback)
+    console.warn('getPostImageUrl - getPublicUrl returned no data for path:', storagePath)
+    return null
+  } catch (error) {
+    console.error('Error generating public URL for path:', storagePath, error)
+    return null
+  }
+}
+
+/**
+ * Get public URL from Supabase Storage path for avatars
+ * Handles both full URLs and paths for avatars bucket
+ */
+export function getAvatarUrl(path: string | null | undefined): string | null {
+  if (!path) return null
+  
+  // If it's already a full URL, return it
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path
+  }
+  
+  // If it's a relative path starting with /, return as-is
+  if (path.startsWith('/')) {
+    return path
+  }
+  
+  // If it's a path like "avatars/filename.jpg", convert to public URL
+  try {
+    // Ensure path starts with avatars/ subfolder
+    const avatarPath = path.startsWith('avatars/') ? path : `avatars/${path}`
+    const { data } = supabase.storage.from('avatars').getPublicUrl(avatarPath)
+    return data?.publicUrl || null
+  } catch {
+    return null
+  }
 }
 
 export function getTimeAgo(dateString: string): string {
@@ -42,9 +129,9 @@ export function getTimeAgo(dateString: string): string {
 }
 
 /**
- * Check if listing is less than 24 hours old
+ * Check if post is less than 24 hours old
  */
-export function isNewListing(dateString: string): boolean {
+export function isNewPost(dateString: string): boolean {
   const now = new Date()
   const date = new Date(dateString)
   const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60)

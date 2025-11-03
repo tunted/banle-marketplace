@@ -128,6 +128,7 @@ export default function CategoryImage({
         className={className}
         sizes={sizes || '(max-width: 640px) 25vw, 12.5vw'}
         priority={priority}
+        loading={priority ? 'eager' : 'lazy'}
         unoptimized={imageSrc.includes('supabase.co/storage')}
         onError={handleImageError}
       />
@@ -144,6 +145,7 @@ export default function CategoryImage({
         height={height}
         className={className}
         priority={priority}
+        loading={priority ? 'eager' : 'lazy'}
         unoptimized={imageSrc.includes('supabase.co/storage')}
         onError={handleImageError}
       />

@@ -1,29 +1,69 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import Image from 'next/image'
+import { getPostImageUrl } from '@/lib/utils'
 
 interface ImageCarouselProps {
-  images: string[]
+  images: string[] // Array of public URLs or filenames
   title: string
+  postId?: string // Optional: if provided, filenames will be converted to URLs
 }
 
-export default function ImageCarousel({ images, title }: ImageCarouselProps) {
+export default function ImageCarousel({ images, title, postId }: ImageCarouselProps) {
   const [currentIndex, setCurrentIndex] = useState(0)
 
+  // Convert image paths/filenames to public URLs
+  // Input can be: public URLs (http/https), relative paths (/), or filenames (if postId provided)
+  const imageUrls = useMemo(() => {
+    return images
+      .map((img) => {
+        if (!img) return null
+        
+        // If already a full URL, return as-is
+        if (img.startsWith('http://') || img.startsWith('https://')) {
+          return img
+        }
+        
+        // If relative path starting with /, return as-is (public asset)
+        if (img.startsWith('/')) {
+          return img
+        }
+        
+        // If postId is provided and img looks like a filename (no path separators)
+        // Convert filename to public URL using postId
+        if (postId && !img.includes('/')) {
+          return getPostImageUrl(postId, img)
+        }
+        
+        // Legacy format: "posts/{postId}/filename.jpg" - extract filename and reconstruct
+        // This handles backward compatibility
+        if (img.includes('/') && postId) {
+          const parts = img.split('/')
+          const filename = parts[parts.length - 1]
+          return getPostImageUrl(postId, filename)
+        }
+        
+        // Fallback: try to use img as-is (might be a legacy full path)
+        // getPostImageUrl will handle backward compatibility
+        return postId ? getPostImageUrl(postId, img) : null
+      })
+      .filter((url): url is string => url !== null && url !== '')
+  }, [images, postId])
+
   const goToPrevious = () => {
-    setCurrentIndex((prev) => (prev === 0 ? images.length - 1 : prev - 1))
+    setCurrentIndex((prev) => (prev === 0 ? imageUrls.length - 1 : prev - 1))
   }
 
   const goToNext = () => {
-    setCurrentIndex((prev) => (prev === images.length - 1 ? 0 : prev + 1))
+    setCurrentIndex((prev) => (prev === imageUrls.length - 1 ? 0 : prev + 1))
   }
 
   const goToImage = (index: number) => {
     setCurrentIndex(index)
   }
 
-  if (images.length === 0) {
+  if (imageUrls.length === 0) {
     return (
       <div className="aspect-[4/3] bg-gray-100 flex items-center justify-center">
         <svg
@@ -47,22 +87,47 @@ export default function ImageCarousel({ images, title }: ImageCarouselProps) {
     <div className="space-y-4">
       {/* Main Image Display */}
       <div className="relative aspect-[4/3] bg-gray-100 rounded-xl overflow-hidden group">
-        <Image
-          src={images[currentIndex]}
-          alt={`${title} - Image ${currentIndex + 1}`}
-          fill
-          className="object-contain"
-          sizes="100vw"
-          priority={currentIndex === 0}
-        />
+        {imageUrls[currentIndex] ? (
+          <Image
+            src={imageUrls[currentIndex]}
+            alt={`${title} - Image ${currentIndex + 1}`}
+            fill
+            className="object-contain"
+            sizes="100vw"
+            priority={currentIndex === 0}
+            loading={currentIndex === 0 ? 'eager' : 'lazy'}
+            unoptimized={imageUrls[currentIndex].startsWith('http') && imageUrls[currentIndex].includes('supabase.co')}
+            onError={(e) => {
+              // Hide broken image and show SVG fallback
+              const target = e.target as HTMLImageElement
+              target.style.display = 'none'
+            }}
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center">
+            <svg
+              className="w-16 h-16 text-gray-400"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+              />
+            </svg>
+          </div>
+        )}
 
         {/* Image Counter */}
         <div className="absolute top-4 right-4 bg-black bg-opacity-60 text-white text-sm font-medium px-3 py-1 rounded-full">
-          {currentIndex + 1} / {images.length}
+          {currentIndex + 1} / {imageUrls.length}
         </div>
 
         {/* Navigation Arrows */}
-        {images.length > 1 && (
+        {imageUrls.length > 1 && (
           <>
             <button
               onClick={goToPrevious}
@@ -107,9 +172,9 @@ export default function ImageCarousel({ images, title }: ImageCarouselProps) {
       </div>
 
       {/* Thumbnail Previews */}
-      {images.length > 1 && (
+      {imageUrls.length > 1 && (
         <div className="flex gap-2 overflow-x-auto pb-2">
-          {images.map((image, index) => (
+          {imageUrls.map((image, index) => (
             <button
               key={index}
               onClick={() => goToImage(index)}
@@ -125,6 +190,7 @@ export default function ImageCarousel({ images, title }: ImageCarouselProps) {
                 width={80}
                 height={80}
                 className="w-full h-full object-cover"
+                loading="lazy"
               />
             </button>
           ))}

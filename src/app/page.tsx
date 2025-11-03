@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 import Image from 'next/image'
-import { formatCurrency, getTimeAgo, isNewListing } from '@/lib/utils'
+import { formatCurrency, getTimeAgo, isNewPost, getPostImageUrl } from '@/lib/utils'
 import CategoryCarousel from '@/components/CategoryCarousel'
 
 interface Province {
@@ -18,27 +18,27 @@ interface Ward {
   province_code: string
 }
 
-interface Listing {
+interface Post {
   id: string
   title: string
   price: number
   location: string
-  images: string[] | null
+  image_url: string | null
   created_at: string
   category?: string
   province_code?: string
   ward_code?: string
 }
 
-async function fetchListings(
+async function fetchPosts(
   provinceCode?: string | null,
   wardCode?: string | null
-): Promise<Listing[]> {
-  let query = supabase
-    .from('listings')
-    .select('id, title, price, location, images, created_at, category, province_code, ward_code')
-    .order('created_at', { ascending: false })
-    .limit(200)
+): Promise<Post[]> {
+    let query = supabase
+      .from('posts')
+      .select('id, title, price, location, image_url, created_at, category, province_code, ward_code')
+      .order('created_at', { ascending: false })
+      .limit(200)
 
   // Apply location filters
   if (wardCode) {
@@ -50,7 +50,7 @@ async function fetchListings(
   const { data, error } = await query
 
   if (error) {
-    console.error('Error fetching listings:', error)
+    console.error('Error fetching posts:', error)
     return []
   }
 
@@ -58,7 +58,7 @@ async function fetchListings(
 }
 
 export default function HomePage() {
-  const [listings, setListings] = useState<Listing[]>([])
+  const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedCategory, setSelectedCategory] = useState<string>('')
   const [selectedProvinceCode, setSelectedProvinceCode] = useState<string | null>(null)
@@ -107,13 +107,13 @@ export default function HomePage() {
   }, [])
 
   useEffect(() => {
-    async function loadListings() {
+    async function loadPosts() {
       setLoading(true)
-      const data = await fetchListings(selectedProvinceCode, selectedWardCode)
-      setListings(data)
+      const data = await fetchPosts(selectedProvinceCode, selectedWardCode)
+      setPosts(data)
       setLoading(false)
     }
-    loadListings()
+    loadPosts()
   }, [selectedProvinceCode, selectedWardCode])
 
   // Load provinces when modal opens
@@ -207,27 +207,27 @@ export default function HomePage() {
     }
   }, [isLocationModalOpen])
 
-  const filteredListings = useMemo(() => {
-    return listings.filter((listing) => {
+  const filteredPosts = useMemo(() => {
+    return posts.filter((post) => {
       // Category filter
-      if (selectedCategory && listing.category !== selectedCategory) {
+      if (selectedCategory && post.category !== selectedCategory) {
         return false
       }
 
       // Location filter is already applied at the database level via province_code/ward_code
       // Additional validation for exact code matching
-      if (selectedWardCode && listing.ward_code !== selectedWardCode) {
+      if (selectedWardCode && post.ward_code !== selectedWardCode) {
         return false
       }
-      if (selectedProvinceCode && !selectedWardCode && listing.province_code !== selectedProvinceCode) {
+      if (selectedProvinceCode && !selectedWardCode && post.province_code !== selectedProvinceCode) {
         return false
       }
 
       // Keyword search
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase()
-        const titleMatch = listing.title.toLowerCase().includes(query)
-        const locationMatch = listing.location.toLowerCase().includes(query)
+        const titleMatch = post.title.toLowerCase().includes(query)
+        const locationMatch = post.location.toLowerCase().includes(query)
         if (!titleMatch && !locationMatch) {
           return false
         }
@@ -235,7 +235,7 @@ export default function HomePage() {
 
       return true
     })
-  }, [listings, selectedCategory, locationName, searchQuery, selectedProvinceCode, selectedWardCode])
+  }, [posts, selectedCategory, locationName, searchQuery, selectedProvinceCode, selectedWardCode])
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
@@ -351,12 +351,12 @@ export default function HomePage() {
           onCategorySelect={setSelectedCategory}
         />
 
-        {/* Listings Grid */}
+        {/* Posts Grid */}
       {loading ? (
         <div className="text-center py-16">
           <p className="text-gray-500">Đang tải...</p>
         </div>
-      ) : filteredListings.length === 0 ? (
+      ) : filteredPosts.length === 0 ? (
         <div className="text-center py-16">
           <p className="text-gray-500">
             {searchQuery || selectedCategory || (locationName && locationName !== 'Chọn khu vực')
@@ -366,66 +366,45 @@ export default function HomePage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredListings.map((listing) => {
-            // Parse images array - handle both array and string formats
-            let imagesArray: string[] = []
-            if (listing.images) {
-              if (Array.isArray(listing.images)) {
-                imagesArray = listing.images
-              } else if (typeof listing.images === 'string') {
-                try {
-                  // Try to parse as JSON string
-                  const parsed = JSON.parse(listing.images)
-                  if (Array.isArray(parsed)) {
-                    imagesArray = parsed
-                  }
-                } catch {
-                  // If not valid JSON, ignore
-                  imagesArray = []
-                }
-              }
-            }
+          {filteredPosts.map((post, index) => {
+            // Convert image_url filename to public URL
+            // image_url format: "filename.jpg" (just the filename)
+            // getPostImageUrl() reconstructs path as "posts/{postId}/filename.jpg" and generates public URL
+            const imageUrl = getPostImageUrl(post.id, post.image_url)
 
-            // Get first valid image URL
-            const firstImage = imagesArray.find((img) => {
-              if (!img || typeof img !== 'string') return false
-              // Must be a valid absolute URL (http/https) or relative path starting with /
-              return (
-                img.startsWith('http://') ||
-                img.startsWith('https://') ||
-                img.startsWith('/')
-              )
-            }) || null
-
-            const isNew = isNewListing(listing.created_at)
+            const isNew = isNewPost(post.created_at)
+            // Add priority to first 6 images (above fold on most screens)
+            const isPriority = index < 6
 
             return (
               <Link
-                key={listing.id}
-                href={`/listing/${listing.id}`}
+                key={post.id}
+                href={`/posts/${post.id}`}
                 className="bg-white rounded-2xl overflow-hidden transition-all duration-300 transform hover:scale-[1.02] hover:-translate-y-1"
                 style={{
                   boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
                 }}
               >
-                <div className="aspect-[4/3] relative bg-gray-100 flex items-center justify-center">
-                  {firstImage ? (
+                <div className="aspect-[4/3] relative bg-gray-100 flex items-center justify-center overflow-hidden">
+                  {imageUrl ? (
                     <Image
-                      src={firstImage}
-                      alt={listing.title}
+                      src={imageUrl}
+                      alt={post.title}
                       fill
                       className="object-cover"
                       sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-                      loading="lazy"
+                      priority={isPriority}
+                      loading={isPriority ? 'eager' : 'lazy'}
+                      unoptimized={imageUrl.startsWith('http') && imageUrl.includes('supabase.co')}
                       onError={(e) => {
-                        // Hide image on error and show placeholder
+                        // Hide broken image and show SVG fallback
                         const target = e.target as HTMLImageElement
                         target.style.display = 'none'
                       }}
                     />
                   ) : (
                     <svg
-                      className="w-12 h-12 text-gray-400"
+                      className="w-16 h-16 text-gray-400"
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
@@ -448,17 +427,17 @@ export default function HomePage() {
                 </div>
                 <div className="p-4">
                   <h3 className="font-semibold text-gray-900 mb-2 line-clamp-2 min-h-[2.5rem]">
-                    {listing.title}
+                    {post.title}
                   </h3>
                   <p className="text-red-600 font-bold text-lg mb-2">
-                    {formatCurrency(listing.price)}
+                    {formatCurrency(post.price)}
                   </p>
                   <div className="flex items-center justify-between mt-2">
                     <p className="text-gray-500 text-sm truncate">
-                      {listing.location}
+                      {post.location}
                     </p>
                     <p className="text-gray-500 text-sm ml-2 flex-shrink-0">
-                      {getTimeAgo(listing.created_at)}
+                      {getTimeAgo(post.created_at)}
                     </p>
                   </div>
                 </div>

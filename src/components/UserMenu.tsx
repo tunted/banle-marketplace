@@ -5,6 +5,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { getAvatarUrl } from '@/lib/utils'
 
 interface UserProfile {
   id: string
@@ -91,7 +92,7 @@ export default function UserMenu({ user, initialSession }: UserMenuProps) {
   }
 
   const displayName = profile?.full_name || 'Người dùng'
-  const avatarUrl = profile?.avatar_url
+  const avatarUrl = getAvatarUrl(profile?.avatar_url)
   const showAvatar = isLoggedIn && avatarUrl && !avatarError
 
   // Reset avatar error when profile changes
@@ -119,6 +120,7 @@ export default function UserMenu({ user, initialSession }: UserMenuProps) {
             width={40}
             height={40}
             className="w-full h-full object-cover"
+            loading="eager"
             onError={() => setAvatarError(true)}
           />
         ) : (
@@ -169,6 +171,7 @@ export default function UserMenu({ user, initialSession }: UserMenuProps) {
                         width={40}
                         height={40}
                         className="w-full h-full object-cover"
+                        loading="lazy"
                         onError={() => setAvatarError(true)}
                       />
                     ) : (
@@ -204,7 +207,7 @@ export default function UserMenu({ user, initialSession }: UserMenuProps) {
                   </svg>
                 </Link>
                 <Link
-                  href="/my-listings"
+                  href="/my-posts"
                   onClick={() => setIsOpen(false)}
                   className="flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gradient-to-r hover:from-green-50 hover:to-emerald-50 transition-all duration-200 group mx-2 rounded-lg"
                 >

@@ -11,11 +11,84 @@ interface HeaderIconsProps {
 }
 
 export default function HeaderIcons({ user, isLoggedIn: initialIsLoggedIn }: HeaderIconsProps) {
-  const [notificationCount, setNotificationCount] = useState(3) // Mock notification count
-  const [likedCount, setLikedCount] = useState(0) // Mock liked count
+  const [notificationCount, setNotificationCount] = useState(0)
+  const [likedCount, setLikedCount] = useState(0)
   const [isLoggedIn, setIsLoggedIn] = useState(initialIsLoggedIn)
   const [mounted, setMounted] = useState(false)
   const router = useRouter()
+
+  // Load notification count and saved posts count
+  useEffect(() => {
+    if (!isLoggedIn) return
+
+    async function loadCounts() {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
+
+        if (!user) return
+
+        // Fetch unread notification count
+        const { count: notifCount } = await supabase
+          .from('notifications')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+          .eq('is_read', false)
+
+        setNotificationCount(notifCount || 0)
+
+        // Fetch saved posts count
+        const { count: savedCount } = await supabase
+          .from('saved_posts')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+
+        setLikedCount(savedCount || 0)
+      } catch (error) {
+        console.error('Error loading counts:', error)
+      }
+    }
+
+    loadCounts()
+
+    // Subscribe to notification changes
+    const notifChannel = supabase
+      .channel('notifications-count')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'notifications',
+        },
+        () => {
+          loadCounts()
+        }
+      )
+      .subscribe()
+
+    // Subscribe to saved posts changes
+    const savedChannel = supabase
+      .channel('saved-posts-count')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'saved_posts',
+        },
+        () => {
+          loadCounts()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(notifChannel)
+      supabase.removeChannel(savedChannel)
+    }
+  }, [isLoggedIn])
 
   // Verify login status on client side
   useEffect(() => {
@@ -24,8 +97,6 @@ export default function HeaderIcons({ user, isLoggedIn: initialIsLoggedIn }: Hea
       try {
         const { data: { session } } = await supabase.auth.getSession()
         setIsLoggedIn(!!session)
-        
-        // Removed verbose logging
       } catch (error) {
         console.error('Error checking session:', error)
       }
@@ -86,9 +157,9 @@ export default function HeaderIcons({ user, isLoggedIn: initialIsLoggedIn }: Hea
         </svg>
       </Link>
 
-      {/* Liked Posts Icon */}
+      {/* Saved Posts Icon */}
       <Link
-        href="/liked-posts"
+        href="/saved-posts"
         className="relative w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 transition-all duration-200 flex items-center justify-center shadow-md hover:shadow-lg hover:scale-105 transform flex-shrink-0"
         title="Tin đã lưu"
         style={{ 
@@ -110,7 +181,7 @@ export default function HeaderIcons({ user, isLoggedIn: initialIsLoggedIn }: Hea
         </svg>
         {likedCount > 0 && (
           <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center border-2 border-white">
-            {likedCount}
+            {likedCount > 99 ? '99+' : likedCount}
           </span>
         )}
       </Link>
@@ -138,7 +209,7 @@ export default function HeaderIcons({ user, isLoggedIn: initialIsLoggedIn }: Hea
           />
         </svg>
         {notificationCount > 0 && (
-          <span className="absolute -top-1 -right-1 bg-yellow-400 text-gray-900 text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center border-2 border-white animate-pulse">
+          <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center border-2 border-white animate-pulse">
             {notificationCount > 9 ? '9+' : notificationCount}
           </span>
         )}
@@ -146,7 +217,7 @@ export default function HeaderIcons({ user, isLoggedIn: initialIsLoggedIn }: Hea
 
       {/* My Posts Icon */}
       <Link
-        href="/my-listings"
+        href="/my-posts"
         className="relative w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 transition-all duration-200 flex items-center justify-center shadow-md hover:shadow-lg hover:scale-105 transform flex-shrink-0"
         title="Tin đã đăng"
         style={{ 

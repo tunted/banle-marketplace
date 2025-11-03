@@ -231,11 +231,15 @@ export default function PostPage() {
       } = await supabase.auth.getUser()
 
       if (userError || !user) {
+        console.error('User error when posting:', userError)
+        console.log('User:', user)
         alert('Bạn cần đăng nhập để đăng tin.')
         router.push('/login')
         setLoading(false)
         return
       }
+
+      console.log('Creating post for user ID:', user.id, 'Email:', user.email)
 
       // Validate required fields
       const errors: Record<string, string> = {}
@@ -260,8 +264,51 @@ export default function PostPage() {
         return
       }
 
-      // Upload images to Supabase Storage
+      // Step 1: Create post first to get the post ID
+      const postData = {
+        user_id: user.id,
+        title: formData.title.trim(),
+        price: parseFloat(formData.price),
+        phone: formData.phone,
+        location: formData.location.trim(),
+        description: formData.description.trim() || null,
+        image_url: null, // Will be updated after image upload
+        province_code: formData.province_code || null,
+        ward_code: formData.ward_code || null,
+      }
+
+      console.log('Creating post first to get ID...')
+
+      const { data: insertedPost, error: insertError } = await supabase
+        .from('posts')
+        .insert(postData)
+        .select()
+        .single()
+
+      if (insertError) {
+        console.error('Insert error:', insertError)
+        alert(`Lỗi khi tạo tin đăng: ${insertError.message}`)
+        setLoading(false)
+        return
+      }
+
+      if (!insertedPost || !insertedPost.id) {
+        alert('Không thể tạo tin đăng. Vui lòng thử lại.')
+        setLoading(false)
+        return
+      }
+
+      const postId = insertedPost.id
+      console.log('Post created with ID:', postId)
+
+      // Step 2: Upload images to post ID subfolder
       const imageUrls: string[] = []
+
+      console.log('========================================')
+      console.log('[UPLOAD] Starting image upload process')
+      console.log('  Post ID:', postId)
+      console.log('  Number of images:', images.length)
+      console.log('  Image files:', images.map((img, idx) => `${idx + 1}. ${img.name} (${(img.size / 1024).toFixed(2)}KB)`))
 
       if (images.length > 0) {
         try {
@@ -287,14 +334,24 @@ export default function PostPage() {
 
             // Generate unique filename: ${Date.now()}-${index}-${file.name}
             const fileName = `${Date.now()}-${i}-${originalFile.name}`
+            // Upload to subfolder: {postId}/filename.jpg
+            const filePath = `${postId}/${fileName}`
 
+            console.log(`[UPLOAD ${i + 1}] Uploading file...`)
+            console.log(`  Original file: ${originalFile.name} (${(originalFile.size / 1024).toFixed(2)}KB)`)
+            console.log(`  File to upload: ${fileToUpload instanceof File ? fileToUpload.name : 'Blob'} (${(fileToUpload.size / 1024).toFixed(2)}KB)`)
+            console.log(`  Upload path: ${filePath}`)
+            console.log(`  Content type: ${originalFile.type}`)
+            
             const { error: uploadError, data } = await supabase.storage
-              .from('listings')
-              .upload(fileName, fileToUpload, {
+              .from('posts')
+              .upload(filePath, fileToUpload, {
                 cacheControl: '3600',
                 contentType: originalFile.type,
                 upsert: false,
               })
+            
+            console.log(`[UPLOAD ${i + 1}] Upload response:`, { error: uploadError, data })
 
             if (uploadError) {
               console.error('Upload error:', uploadError)
@@ -304,61 +361,337 @@ export default function PostPage() {
               const errorMsg = uploadError.message?.toLowerCase() || ''
               
               if (statusCode === 404 || errorMsg.includes('not found') || errorMsg.includes('bucket')) {
-                setUploadError('Hệ thống đang cập nhật. Vui lòng thử lại sau.')
+                setUploadError('Bucket "posts" chưa được tạo. Vui lòng tạo bucket trong Supabase Dashboard (Storage > New bucket > name: "posts" > Public bucket) rồi chạy lại SQL script create-posts-bucket.sql')
               } else if (statusCode === 403 || statusCode === 400 || errorMsg.includes('permission') || errorMsg.includes('forbidden') || errorMsg.includes('policy')) {
-                setUploadError('Không có quyền tải ảnh lên. Vui lòng liên hệ hỗ trợ.')
+                setUploadError('Không có quyền tải ảnh lên. Vui lòng kiểm tra RLS policies của bucket "posts" trong Supabase.')
               } else if (errorMsg.includes('network') || errorMsg.includes('timeout') || errorMsg.includes('failed to fetch')) {
                 setUploadError('Không thể tải ảnh lên. Vui lòng kiểm tra kết nối.')
               } else {
-                setUploadError('Không thể tải ảnh lên. Vui lòng thử lại.')
+                setUploadError(`Không thể tải ảnh lên: ${uploadError.message || 'Lỗi không xác định'}. Vui lòng thử lại.`)
               }
               
+              // Clean up: Delete the post if image upload fails
+              await supabase.from('posts').delete().eq('id', postId)
               setLoading(false)
               return
             }
 
             if (!data) {
               setUploadError('Không thể tải ảnh lên. Vui lòng thử lại.')
+              // Clean up: Delete the post if image upload fails
+              await supabase.from('posts').delete().eq('id', postId)
               setLoading(false)
               return
             }
 
-            // Get public URL
-            const { data: urlData } = supabase.storage
-              .from('listings')
-              .getPublicUrl(data.path)
+            // Store the full path for database: posts/{postId}/filename.jpg
+            // This is the complete object path in the storage bucket
+            const fullPath = `posts/${filePath}` // filePath is {postId}/filename.jpg, so fullPath is posts/{postId}/filename.jpg
+            
+            if (!fullPath || !fullPath.startsWith(`posts/${postId}/`)) {
+              console.error(`[Upload ${i + 1}] ERROR: Invalid path format!`)
+              throw new Error(`Invalid upload path format: ${fullPath}`)
+            }
+            
+            // Store the full path (posts/{postId}/filename.jpg) for database
+            imageUrls.push(fullPath)
+            console.log(`[UPLOAD ${i + 1}] ✅ Upload successful!`)
+            console.log(`  Full path stored: ${fullPath}`)
+          }
+          
+          console.log(`[UPLOAD] All ${imageUrls.length} image(s) uploaded successfully`)
+          console.log(`  Image URLs:`, imageUrls)
 
-            if (urlData?.publicUrl) {
-              imageUrls.push(urlData.publicUrl)
+          // Step 3: Update post with first image filename only
+          // Store only filename: "filename.jpg" (not the full path)
+          if (imageUrls.length > 0) {
+            const fullPath = imageUrls[0] // Format: "posts/{postId}/filename.jpg"
+            // Extract only the filename from the full path
+            // fullPath = "posts/{postId}/filename.jpg" -> filename.jpg
+            const pathParts = fullPath.split('/')
+            const filename = pathParts[pathParts.length - 1] // Get last part (filename)
+            const pathToStore = filename // Store only "filename.jpg"
+            
+            console.log('[UPLOAD] Extracting filename from full path')
+            console.log('  Full path:', fullPath)
+            console.log('  Filename to store:', pathToStore)
+            
+            console.log('[UPLOAD] ========================================')
+            console.log('[UPLOAD] Updating post with image path')
+            console.log('  Post ID:', postId)
+            console.log('  Path to store:', pathToStore)
+            console.log('  Path type:', typeof pathToStore)
+            console.log('  Path length:', pathToStore?.length)
+            
+            // Verify post exists before updating
+            const { data: verifyPost, error: verifyPostError } = await supabase
+              .from('posts')
+              .select('id, image_url')
+              .eq('id', postId)
+              .single()
+            
+            console.log('[UPLOAD] Post verification:', { verifyPost, verifyPostError })
+            
+            if (verifyPostError) {
+              console.error('[UPLOAD] ❌ Cannot verify post exists:', verifyPostError)
+            }
+            
+            // Update the post with image_url
+            // NOTE: RLS policy already ensures users can only update their own posts
+            console.log('[UPLOAD] Attempting to update post with image_url...')
+            console.log('  User ID:', user.id)
+            console.log('  Post ID:', postId)
+            console.log('  Path to store:', pathToStore)
+            
+            // First, verify the post belongs to the user (for debugging)
+            const { data: verifyOwnership } = await supabase
+              .from('posts')
+              .select('id, user_id')
+              .eq('id', postId)
+              .eq('user_id', user.id)
+              .single()
+            
+            console.log('[UPLOAD] Ownership verification:', verifyOwnership)
+            
+            if (!verifyOwnership) {
+              console.error('[UPLOAD] ❌ Post does not belong to user or post not found!')
+              setUploadError('Không thể xác minh quyền sở hữu của tin đăng. Vui lòng thử lại.')
+              // Continue anyway - let RLS handle it
+            }
+            
+            // Update the post with image_url
+            // Strategy: Do UPDATE without SELECT first (to avoid RLS SELECT issues)
+            // Then verify separately with a SELECT query
+            console.log('[UPLOAD] Step 1: Updating post with image_url (no SELECT to avoid RLS issues)...')
+            console.log('  Post ID:', postId)
+            console.log('  Setting image_url to:', pathToStore)
+            console.log('  User ID:', user.id)
+            
+            // First attempt: UPDATE without SELECT, let RLS handle authorization
+            // Don't use .eq('user_id', user.id) - let RLS policy check it
+            console.log('[UPLOAD] Attempting UPDATE (RLS will verify ownership)...')
+            const { error: updateError, data: updateResult, count: updateCount } = await supabase
+              .from('posts')
+              .update({ image_url: pathToStore })
+              .eq('id', postId)
+              // Note: We don't filter by user_id here - RLS policy will handle it
+
+            console.log('[UPLOAD] Update response (no select):', { 
+              error: updateError,
+              data: updateResult,
+              count: updateCount,
+              hasError: !!updateError,
+              hasData: !!updateResult
+            })
+            
+            if (updateError) {
+              console.error('[UPLOAD] ❌ Update failed:', updateError)
+              console.error('  Error code:', updateError.code)
+              console.error('  Error message:', updateError.message)
+              console.error('  Error details:', updateError.details)
+              console.error('  Error hint:', updateError.hint)
+              
+              // Check if it's an RLS error
+              if (updateError.code === '42501' || updateError.code === 'PGRST301' || updateError.message?.includes('permission') || updateError.message?.includes('policy') || updateError.message?.includes('RLS')) {
+                console.error('[UPLOAD] ❌ RLS policy is blocking the UPDATE!')
+                console.error('  This means the RLS policy "Users can update their own posts" is not working correctly.')
+                console.error('  Please run the SQL script: fix-rls-update-policy.sql')
+                console.error('  Or manually add WITH CHECK clause to the UPDATE policy')
+                setUploadError('RLS policy đang chặn cập nhật. Vui lòng chạy SQL script fix-rls-update-policy.sql trong Supabase Dashboard.')
+              } else {
+                setUploadError(`Không thể cập nhật ảnh vào database: ${updateError.message || 'Lỗi không xác định. Vui lòng kiểm tra RLS policies.'}`)
+              }
+              setLoading(false)
+              return
+            }
+            
+            // Check if update actually affected any rows
+            if (updateCount !== undefined && updateCount === 0) {
+              console.error('[UPLOAD] ❌ UPDATE affected 0 rows!')
+              console.error('  This means either:')
+              console.error('    1. Post does not exist')
+              console.error('    2. RLS policy blocked the update (no error but no rows updated)')
+              console.error('    3. Post does not belong to current user')
+              
+              // Verify post exists and belongs to user
+              const { data: checkPost, error: checkError } = await supabase
+                .from('posts')
+                .select('id, user_id, image_url')
+                .eq('id', postId)
+                .single()
+              
+              if (checkError || !checkPost) {
+                console.error('[UPLOAD] ❌ Cannot verify post exists:', checkError)
+                setUploadError('Không thể tìm thấy tin đăng. Vui lòng thử lại.')
+              } else if (checkPost.user_id !== user.id) {
+                console.error('[UPLOAD] ❌ Post does not belong to user!')
+                console.error('  Post user_id:', checkPost.user_id)
+                console.error('  Current user_id:', user.id)
+                setUploadError('Bạn không có quyền cập nhật tin đăng này.')
+              } else {
+                console.error('[UPLOAD] ❌ Post exists and belongs to user, but UPDATE affected 0 rows')
+                console.error('  This suggests RLS is silently blocking the UPDATE')
+                setUploadError('RLS policy đang chặn cập nhật. Vui lòng chạy SQL script fix-rls-update-policy.sql.')
+              }
+              setLoading(false)
+              return
+            }
+            
+            // Wait a brief moment for the update to commit
+            await new Promise(resolve => setTimeout(resolve, 200))
+            
+            // Step 2: Verify the update worked by fetching the post
+            console.log('[UPLOAD] Step 2: Verifying update by fetching post...')
+            const { data: verifyData, error: verifyFetchError } = await supabase
+              .from('posts')
+              .select('id, image_url, user_id')
+              .eq('id', postId)
+              .single()
+            
+            console.log('[UPLOAD] Verification fetch:', { 
+              data: verifyData, 
+              error: verifyFetchError,
+              image_url: verifyData?.image_url
+            })
+            
+            if (verifyFetchError) {
+              console.error('[UPLOAD] ❌ Cannot verify update - fetch failed:', verifyFetchError)
+              console.error('  This might mean RLS is blocking SELECT, but UPDATE might have worked')
+              
+              // Try one more verification with a count query
+              const { count: postCount } = await supabase
+                .from('posts')
+                .select('*', { count: 'exact', head: true })
+                .eq('id', postId)
+                .eq('user_id', user.id)
+              
+              console.log('[UPLOAD] Post count check:', { count: postCount })
+              
+              if (postCount === 1) {
+                console.log('[UPLOAD] ⚠️ Post exists but cannot verify image_url due to RLS SELECT blocking')
+                console.log('[UPLOAD] ⚠️ UPDATE likely succeeded but SELECT is blocked by RLS')
+                // Continue - the update probably worked, we just can't verify due to RLS
+              } else {
+                setUploadError('Không thể xác minh cập nhật. Vui lòng kiểm tra RLS policies hoặc thử lại.')
+                setLoading(false)
+                return
+              }
+            } else if (verifyData) {
+              // Successfully fetched - check if image_url was saved
+              if (verifyData.image_url === pathToStore) {
+                console.log('[UPLOAD] ✅ Update verified! image_url was saved correctly.')
+                console.log('  Stored value:', verifyData.image_url)
+              } else if (!verifyData.image_url || verifyData.image_url === null) {
+                console.error('[UPLOAD] ❌ CRITICAL: Update did NOT work - image_url is still NULL!')
+                console.error('  Post ID:', postId)
+                console.error('  Expected:', pathToStore)
+                console.error('  Got (after update):', verifyData.image_url)
+                console.error('  Post user_id:', verifyData.user_id)
+                console.error('  Current user_id:', user.id)
+                console.error('  User IDs match?', verifyData.user_id === user.id)
+                
+                // This is critical - UPDATE appeared to succeed but image_url is still null
+                // This usually means RLS is silently blocking the UPDATE
+                console.error('[UPLOAD] ❌ DIAGNOSIS: UPDATE query returned no error but did not actually update')
+                console.error('  This is typically caused by RLS policy blocking UPDATE without WITH CHECK clause')
+                console.error('  SOLUTION: Run fix-rls-update-policy.sql in Supabase SQL Editor')
+                
+                setUploadError('RLS policy đang chặn cập nhật. Vui lòng chạy SQL script "fix-rls-update-policy.sql" trong Supabase Dashboard > SQL Editor. Xem file fix-rls-update-policy.sql trong project.')
+                setLoading(false)
+                return
+              } else {
+                console.warn('[UPLOAD] ⚠️ image_url mismatch (but may be acceptable):')
+                console.warn('  Expected:', pathToStore)
+                console.warn('  Got:', verifyData.image_url)
+                console.warn('  This might be a legacy format - continuing anyway')
+                // Continue - might be a different format but still valid
+              }
+            } else {
+              console.error('[UPLOAD] ❌ Verification returned no data!')
+              console.error('  This might mean RLS is blocking SELECT queries')
+              setUploadError('Không thể xác minh cập nhật. RLS có thể đang chặn SELECT. Vui lòng kiểm tra RLS policies.')
+              setLoading(false)
+              return
+            }
+            
+            console.log('[UPLOAD] ✅ Update process completed successfully!')
+            
+            console.log('[UPLOAD] ========================================')
+          } else {
+            console.warn('[UPLOAD] ⚠️ No image URLs were generated - imageUrls array is empty')
+            console.warn('  This means no images were uploaded or the upload failed silently')
+            console.warn('  images.length:', images.length)
+            console.warn('  imageUrls:', imageUrls)
+          }
+          
+          // Final verification: Fetch the post one more time to confirm image_url was saved
+          // This is critical - if image_url is not saved, the post is incomplete
+          console.log('[UPLOAD] Performing final verification...')
+          const { data: finalPost, error: finalError } = await supabase
+            .from('posts')
+            .select('id, image_url, user_id, title')
+            .eq('id', postId)
+            .single()
+          
+          console.log('[UPLOAD] Final verification result:', { 
+            post: finalPost, 
+            error: finalError,
+            image_url: finalPost?.image_url 
+          })
+          
+          // If images were uploaded, image_url MUST not be null
+          if (imageUrls.length > 0) {
+            const expectedFilename = imageUrls[0].split('/').pop() // Get filename from full path
+            
+            if (!finalPost || !finalPost.image_url) {
+              console.error('[UPLOAD] ❌ CRITICAL: Post exists but image_url is NULL!')
+              console.error('  Expected image_url (filename):', expectedFilename)
+              console.error('  Actual image_url:', finalPost?.image_url)
+              console.error('  Final error:', finalError)
+              
+              // This is a critical error - post exists but image_url is not saved
+              // We should NOT continue - the post is incomplete
+              setUploadError('Ảnh đã tải lên nhưng không thể lưu đường dẫn vào database. Tin đăng không hoàn chỉnh. Vui lòng thử lại.')
+              setLoading(false)
+              return // Exit early - don't show success message
+            } else if (finalPost.image_url !== expectedFilename) {
+              // Check if it's the full path format (backward compatibility)
+              const isFullPath = finalPost.image_url.includes('/')
+              if (!isFullPath && finalPost.image_url !== expectedFilename) {
+                console.warn('[UPLOAD] ⚠️ Filename mismatch (but may be acceptable):')
+                console.warn('  Expected:', expectedFilename)
+                console.warn('  Got:', finalPost.image_url)
+              } else {
+                console.log('[UPLOAD] ✅ Final verification passed - image_url is saved correctly')
+              }
+            } else {
+              console.log('[UPLOAD] ✅ Final verification passed - image_url matches expected filename')
             }
           }
         } catch (uploadException: any) {
-          console.error('Exception during upload:', uploadException)
-          setUploadError('Không thể tải ảnh lên. Vui lòng kiểm tra kết nối.')
+          console.error('[UPLOAD] Exception during upload:', uploadException)
+          console.error('  Error message:', uploadException?.message)
+          console.error('  Error stack:', uploadException?.stack)
+          setUploadError(`Không thể tải ảnh lên: ${uploadException?.message || 'Lỗi không xác định'}`)
+          // Clean up: Delete the post if image upload fails
+          await supabase.from('posts').delete().eq('id', postId)
           setLoading(false)
           return
         }
+      } else {
+        console.log('[UPLOAD] No images to upload - images array is empty')
       }
+      
+      console.log('[UPLOAD] Upload process completed')
+      console.log('  Total image URLs:', imageUrls.length)
+      console.log('  Final image_url in DB:', imageUrls[0] || 'None')
+      console.log('========================================')
 
-      // Insert listing into database
-      const { error: insertError } = await supabase.from('listings').insert({
-        user_id: user.id,
-        title: formData.title.trim(),
-        price: parseFloat(formData.price),
-        phone: formData.phone,
-        location: formData.location.trim(),
-        description: formData.description.trim() || null,
-        images: imageUrls.length > 0 ? imageUrls : null,
-        province_code: formData.province_code || null,
-        ward_code: formData.ward_code || null,
-      })
-
-      if (insertError) {
-        console.error('Insert error:', insertError)
-        alert(`Lỗi khi tạo tin đăng: ${insertError.message}`)
-        setLoading(false)
-        return
-      }
+      console.log('Post created successfully:', insertedPost)
+      console.log('Post ID:', postId)
+      console.log('Post user_id:', insertedPost?.user_id)
+      console.log('Current user ID:', user.id)
+      console.log('Image URL:', imageUrls.length > 0 ? imageUrls[0] : null)
 
       // Record successful post for rate limiting
       recordPostAttempt()
