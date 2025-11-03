@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import NotificationBadge from './NotificationBadge'
 
 interface HeaderIconsProps {
   user: { id: string; full_name: string | null; avatar_url: string | null } | null
@@ -13,6 +14,8 @@ interface HeaderIconsProps {
 export default function HeaderIcons({ user, isLoggedIn: initialIsLoggedIn }: HeaderIconsProps) {
   const [notificationCount, setNotificationCount] = useState(0)
   const [likedCount, setLikedCount] = useState(0)
+  const [unreadMessagesCount, setUnreadMessagesCount] = useState(0)
+  const [myPostsCount, setMyPostsCount] = useState(0)
   const [isLoggedIn, setIsLoggedIn] = useState(initialIsLoggedIn)
   const [mounted, setMounted] = useState(false)
   const router = useRouter()
@@ -20,6 +23,8 @@ export default function HeaderIcons({ user, isLoggedIn: initialIsLoggedIn }: Hea
   // Load notification count and saved posts count
   useEffect(() => {
     if (!isLoggedIn) return
+
+    let handleMessagesRead: (() => void) | null = null
 
     async function loadCounts() {
       try {
@@ -45,6 +50,46 @@ export default function HeaderIcons({ user, isLoggedIn: initialIsLoggedIn }: Hea
           .eq('user_id', user.id)
 
         setLikedCount(savedCount || 0)
+
+        // Fetch unread messages count (conversations with unread messages)
+        const { data: conversations, error: convError } = await supabase
+          .from('conversations')
+          .select('id')
+          .or(`user1_id.eq.${user.id},user2_id.eq.${user.id}`)
+
+        if (convError) {
+          console.warn('[HeaderIcons] Error fetching conversations:', convError)
+        }
+
+        if (conversations && conversations.length > 0) {
+          const conversationIds = conversations.map((c) => c.id)
+          
+          // Count unread messages (messages sent by others that are unread)
+          // Only count messages where read_at is null (truly unread)
+          const { count: unreadCount, error: messagesError } = await supabase
+            .from('messages')
+            .select('*', { count: 'exact', head: true })
+            .in('conversation_id', conversationIds)
+            .neq('sender_id', user.id)
+            .is('read_at', null)
+
+          if (messagesError) {
+            console.warn('[HeaderIcons] Error counting unread messages:', messagesError)
+            setUnreadMessagesCount(0)
+          } else {
+            setUnreadMessagesCount(unreadCount || 0)
+          }
+        } else {
+          setUnreadMessagesCount(0)
+        }
+
+        // Fetch my posts count
+        const { count: postsCount } = await supabase
+          .from('posts')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+
+        setMyPostsCount(postsCount || 0)
       } catch (error) {
         console.error('Error loading counts:', error)
       }
@@ -84,9 +129,52 @@ export default function HeaderIcons({ user, isLoggedIn: initialIsLoggedIn }: Hea
       )
       .subscribe()
 
+    // Subscribe to messages changes
+    const messagesChannel = supabase
+      .channel('messages-count')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'messages',
+        },
+        () => {
+          loadCounts()
+        }
+      )
+      .subscribe()
+
+    // Listen for custom event when messages are marked as read
+    handleMessagesRead = () => {
+      loadCounts()
+    }
+    window.addEventListener('messagesRead', handleMessagesRead)
+
+    // Subscribe to posts changes
+    const postsChannel = supabase
+      .channel('posts-count')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'posts',
+        },
+        () => {
+          loadCounts()
+        }
+      )
+      .subscribe()
+
     return () => {
       supabase.removeChannel(notifChannel)
       supabase.removeChannel(savedChannel)
+      supabase.removeChannel(messagesChannel)
+      supabase.removeChannel(postsChannel)
+      if (handleMessagesRead) {
+        window.removeEventListener('messagesRead', handleMessagesRead)
+      }
     }
   }, [isLoggedIn])
 
@@ -155,6 +243,7 @@ export default function HeaderIcons({ user, isLoggedIn: initialIsLoggedIn }: Hea
             d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
           />
         </svg>
+        <NotificationBadge count={unreadMessagesCount} />
       </Link>
 
       {/* Saved Posts Icon */}
@@ -179,11 +268,7 @@ export default function HeaderIcons({ user, isLoggedIn: initialIsLoggedIn }: Hea
             d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"
           />
         </svg>
-        {likedCount > 0 && (
-          <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center border-2 border-white">
-            {likedCount > 99 ? '99+' : likedCount}
-          </span>
-        )}
+        <NotificationBadge count={likedCount} />
       </Link>
 
       {/* Notifications Icon */}
@@ -208,11 +293,7 @@ export default function HeaderIcons({ user, isLoggedIn: initialIsLoggedIn }: Hea
             d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
           />
         </svg>
-        {notificationCount > 0 && (
-          <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center border-2 border-white animate-pulse">
-            {notificationCount > 9 ? '9+' : notificationCount}
-          </span>
-        )}
+        <NotificationBadge count={notificationCount} className="animate-pulse" />
       </button>
 
       {/* My Posts Icon */}
@@ -237,6 +318,7 @@ export default function HeaderIcons({ user, isLoggedIn: initialIsLoggedIn }: Hea
             d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
           />
         </svg>
+        <NotificationBadge count={myPostsCount} />
       </Link>
     </div>
   )

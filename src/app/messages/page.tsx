@@ -33,6 +33,17 @@ export default function MessagesPage() {
   const searchParams = useSearchParams()
 
   useEffect(() => {
+    // Refresh header counts when page becomes visible
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        // Trigger header refresh when page becomes visible
+        window.dispatchEvent(new CustomEvent('messagesRead'))
+      }
+    }
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('focus', handleVisibilityChange)
+
     async function loadConversations() {
       try {
         const {
@@ -155,6 +166,11 @@ export default function MessagesPage() {
     }
 
     loadConversations()
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('focus', handleVisibilityChange)
+    }
   }, [router, searchParams])
 
   // Check if we should open a specific conversation

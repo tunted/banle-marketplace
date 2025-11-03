@@ -141,6 +141,9 @@ export default function ConversationPage() {
         // Load messages
         await loadMessages()
 
+        // Mark all messages in this conversation as read when viewing
+        await markMessagesAsRead(conversationId, user.id)
+
         // Subscribe to new messages with real-time updates
         const channel = supabase
           .channel(`conversation:${conversationId}`)
@@ -152,10 +155,25 @@ export default function ConversationPage() {
               table: 'messages',
               filter: `conversation_id=eq.${conversationId}`,
             },
-            (payload) => {
+            async (payload) => {
               // Optimistically update UI with new message
               if (payload.new) {
                 const newMsg = payload.new as any
+                const {
+                  data: { user },
+                } = await supabase.auth.getUser()
+                
+                // If the new message is from someone else and we're viewing this conversation, mark it as read immediately
+                if (user && newMsg.sender_id !== user.id) {
+                  await supabase
+                    .from('messages')
+                    .update({ read_at: new Date().toISOString() })
+                    .eq('id', newMsg.id)
+                  
+                  // Trigger header refresh
+                  window.dispatchEvent(new CustomEvent('messagesRead', { detail: { conversationId: conversationId } }))
+                }
+                
                 setMessages((prev) => {
                   // Check if message already exists to avoid duplicates
                   if (prev.some((m) => m.id === newMsg.id)) {
@@ -264,9 +282,44 @@ export default function ConversationPage() {
       }))
 
       setMessages(transformedMessages)
+
+      // Mark messages as read after loading
+      await markMessagesAsRead(conversationId, user.id)
     } catch (err: any) {
       console.error('[ConversationPage] Unexpected error loading messages:', err)
       alert(`Lỗi khi tải tin nhắn: ${err?.message || 'Vui lòng thử lại.'}`)
+    }
+  }
+
+  // Mark messages as read when viewing conversation
+  const markMessagesAsRead = async (convId: string, userId: string) => {
+    try {
+      // Get all unread messages in this conversation that were sent by others
+      const { data: unreadMessages } = await supabase
+        .from('messages')
+        .select('id')
+        .eq('conversation_id', convId)
+        .neq('sender_id', userId)
+        .is('read_at', null)
+
+      if (unreadMessages && unreadMessages.length > 0) {
+        // Mark all as read
+        const messageIds = unreadMessages.map((msg) => msg.id)
+        const { error: updateError } = await supabase
+          .from('messages')
+          .update({ read_at: new Date().toISOString() })
+          .in('id', messageIds)
+
+        if (updateError) {
+          console.warn('[ConversationPage] Error marking messages as read:', updateError)
+        } else {
+          console.log(`[ConversationPage] Marked ${messageIds.length} messages as read`)
+          // Trigger a refresh of unread count in header
+          window.dispatchEvent(new CustomEvent('messagesRead', { detail: { conversationId: convId } }))
+        }
+      }
+    } catch (err) {
+      console.error('[ConversationPage] Error in markMessagesAsRead:', err)
     }
   }
 
