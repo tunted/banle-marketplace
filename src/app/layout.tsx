@@ -11,27 +11,56 @@ export const metadata: Metadata = {
   description: 'Rao vặt miễn phí – Bán nhanh, mua lẹ!',
 }
 
+// Force dynamic rendering because we use cookies for auth
+export const dynamic = 'force-dynamic'
+
 export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  const supabase = await createClient()
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
-
+  let session = null
   let userProfile = null
-  if (session?.user) {
-    const { data } = await supabase
-      .from('user_profiles')
-      .select('id, full_name, avatar_url')
-      .eq('id', session.user.id)
-      .single()
-    
-    if (data) {
-      userProfile = data
+
+  try {
+    const supabase = await createClient()
+    const {
+      data: { session: authSession },
+      error: sessionError,
+    } = await supabase.auth.getSession()
+
+    // Handle session errors gracefully
+    if (sessionError) {
+      console.error('Error getting session:', sessionError)
+      // Continue without session - user will see logged-out state
+    } else {
+      session = authSession
     }
+
+    // Fetch user profile if session exists
+    if (session?.user) {
+      try {
+        const { data, error: profileError } = await supabase
+          .from('user_profiles')
+          .select('id, full_name, avatar_url')
+          .eq('id', session.user.id)
+          .single()
+        
+        if (profileError) {
+          // Profile might not exist yet - that's okay
+          console.warn('Profile fetch error (may not exist yet):', profileError.message)
+        } else if (data) {
+          userProfile = data
+        }
+      } catch (profileErr) {
+        console.error('Unexpected error fetching profile:', profileErr)
+        // Continue without profile - user will see logged-out state
+      }
+    }
+  } catch (error) {
+    // Handle Supabase client creation errors (e.g., missing env vars)
+    console.error('Error initializing Supabase client:', error)
+    // Continue rendering - page will work but auth features won't
   }
 
   return (

@@ -45,8 +45,8 @@ export default function NotificationsPage() {
         }
 
         // Fetch related user_profiles and posts separately
-        const userIds = [...new Set(notificationsData.map(n => n.from_user_id).filter(Boolean))]
-        const postIds = [...new Set(notificationsData.map(n => n.post_id).filter(Boolean))]
+        const userIds = [...new Set(notificationsData.map(n => n.from_user_id).filter(Boolean) as string[])]
+        const postIds = [...new Set(notificationsData.map(n => n.post_id).filter(Boolean) as string[])]
 
         // Fetch user profiles
         const { data: userProfiles } = await supabase
@@ -60,24 +60,32 @@ export default function NotificationsPage() {
           .select('id, title')
           .in('id', postIds)
 
-        // Create lookup maps
-        const userProfilesMap = new Map(
-          (userProfiles || []).map(profile => [profile.id, profile])
+        // Create lookup maps with proper types
+        const userProfilesMap = new Map<string, { id: string; full_name: string | null; avatar_url: string | null }>(
+          (userProfiles || []).map(profile => [profile.id, {
+            id: profile.id,
+            full_name: profile.full_name,
+            avatar_url: profile.avatar_url,
+          }])
         )
-        const postsMap = new Map(
-          (postsData || []).map(post => [post.id, post])
+        const postsMap = new Map<string, { id: string; title: string }>(
+          (postsData || []).map(post => [post.id, {
+            id: post.id,
+            title: post.title,
+          }])
         )
 
         // Transform data with related entities
+        // Use undefined instead of null for optional fields to match Notification interface
         const transformed: Notification[] = notificationsData.map((item) => ({
-          id: item.id,
-          type: item.type,
-          from_user_id: item.from_user_id,
-          post_id: item.post_id,
-          is_read: item.is_read,
-          created_at: item.created_at,
-          from_user: item.from_user_id ? userProfilesMap.get(item.from_user_id) || null : null,
-          post: item.post_id ? postsMap.get(item.post_id) || null : null,
+          id: item.id as string,
+          type: item.type as 'like' | 'new_message',
+          from_user_id: item.from_user_id as string | null,
+          post_id: item.post_id as string | null,
+          is_read: item.is_read as boolean,
+          created_at: item.created_at as string,
+          from_user: item.from_user_id ? (userProfilesMap.get(item.from_user_id) || undefined) : undefined,
+          post: item.post_id ? (postsMap.get(item.post_id) || undefined) : undefined,
         }))
 
         setNotifications(transformed)
