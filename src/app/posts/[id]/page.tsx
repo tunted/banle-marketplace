@@ -91,10 +91,9 @@ export default async function PostDetailPage({
   let validImages: string[] = []
   
   if (post.image_url) {
-    // Convert the stored filename to public URL
-    // image_url format: "filename.jpg" (just the filename)
-    // getPostImageUrl() reconstructs path as "posts/{postId}/filename.jpg" and generates public URL
-    const imageUrl = getPostImageUrl(post.id, post.image_url)
+    // Convert the stored path to public URL
+    // Uses the exact image_url value stored in the database without path manipulation
+    const imageUrl = getPostImageUrl(post.image_url)
     
     if (imageUrl) {
       validImages = [imageUrl]
@@ -123,8 +122,9 @@ export default async function PostDetailPage({
             })
             .map((file) => {
               // file.name is just the filename, post.id is the folder
-              // getPostImageUrl() reconstructs path as "{postId}/{filename}"
-              return getPostImageUrl(post.id, file.name)
+              // Construct storage path as "{postId}/{filename}" and convert to public URL
+              const storagePath = `${post.id}/${file.name}`
+              return getPostImageUrl(storagePath)
             })
             .filter((url): url is string => url !== null && url !== '')
 
@@ -175,7 +175,7 @@ export default async function PostDetailPage({
           <div className="lg:col-span-2 space-y-6">
             {/* Image Carousel */}
             <div className="bg-white rounded-xl shadow-sm p-6">
-              <ImageCarousel images={validImages} title={post.title} postId={post.id} />
+              <ImageCarousel images={validImages} title={post.title} />
             </div>
 
             {/* Product Info */}

@@ -24,18 +24,17 @@ interface PostCardProps {
 export default function PostCard({ post, showActions = false, onDelete }: PostCardProps) {
   // Get image URL from image_url field
   const firstImageUrl = useMemo(() => {
-    if (!post.image_url || !post.id) {
+    if (!post.image_url) {
       return null // No placeholder path - will show SVG fallback
     }
     
     // Get public URL from Supabase Storage
-    // image_url format: "filename.jpg" (just the filename)
-    // getPostImageUrl() reconstructs path as "posts/{postId}/filename.jpg" and generates public URL
-    const publicUrl = getPostImageUrl(post.id, post.image_url)
+    // Uses the exact image_url value stored in the database without path manipulation
+    const publicUrl = getPostImageUrl(post.image_url)
     
     // Return the URL (will be public URL or null for SVG fallback)
     return publicUrl
-  }, [post.id, post.image_url])
+  }, [post.image_url])
 
   return (
     <div className="bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">

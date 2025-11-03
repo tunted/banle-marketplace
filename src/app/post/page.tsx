@@ -455,19 +455,19 @@ export default function PostPage() {
           console.log(`[UPLOAD] All ${imageUrls.length} image(s) uploaded successfully`)
           console.log(`  Image URLs:`, imageUrls)
 
-          // Step 3: Update post with first image filename only
-          // Store only filename: "filename.jpg" (not the full path)
+          // Step 3: Update post with storage path
+          // Store the full storage path within the bucket: "{postId}/filename.jpg"
           if (imageUrls.length > 0) {
             const fullPath = imageUrls[0] // Format: "posts/{postId}/filename.jpg"
-            // Extract only the filename from the full path
-            // fullPath = "posts/{postId}/filename.jpg" -> filename.jpg
-            const pathParts = fullPath.split('/')
-            const filename = pathParts[pathParts.length - 1] // Get last part (filename)
-            const pathToStore = filename // Store only "filename.jpg"
+            // Remove "posts/" prefix to get storage path within bucket
+            // fullPath = "posts/{postId}/filename.jpg" -> "{postId}/filename.jpg"
+            const pathToStore = fullPath.startsWith('posts/') 
+              ? fullPath.substring(6) // Remove "posts/" prefix
+              : fullPath // Already without prefix
             
-            console.log('[UPLOAD] Extracting filename from full path')
+            console.log('[UPLOAD] Storing full storage path')
             console.log('  Full path:', fullPath)
-            console.log('  Filename to store:', pathToStore)
+            console.log('  Storage path to store:', pathToStore)
             
             console.log('[UPLOAD] ========================================')
             console.log('[UPLOAD] Updating post with image path')
@@ -694,11 +694,15 @@ export default function PostPage() {
           
           // If images were uploaded, image_url MUST not be null
           if (imageUrls.length > 0) {
-            const expectedFilename = imageUrls[0].split('/').pop() // Get filename from full path
+            // Expected storage path: "{postId}/filename.jpg" (without "posts/" prefix)
+            const fullPath = imageUrls[0] // Format: "posts/{postId}/filename.jpg"
+            const expectedPath = fullPath.startsWith('posts/') 
+              ? fullPath.substring(6) // Remove "posts/" prefix
+              : fullPath // Already without prefix
             
             if (!finalPost || !finalPost.image_url) {
               console.error('[UPLOAD] ❌ CRITICAL: Post exists but image_url is NULL!')
-              console.error('  Expected image_url (filename):', expectedFilename)
+              console.error('  Expected image_url (storage path):', expectedPath)
               console.error('  Actual image_url:', finalPost?.image_url)
               console.error('  Final error:', finalError)
               
@@ -707,18 +711,13 @@ export default function PostPage() {
               setUploadError('Ảnh đã tải lên nhưng không thể lưu đường dẫn vào database. Tin đăng không hoàn chỉnh. Vui lòng thử lại.')
               setLoading(false)
               return // Exit early - don't show success message
-            } else if (finalPost.image_url !== expectedFilename) {
-              // Check if it's the full path format (backward compatibility)
-              const isFullPath = finalPost.image_url.includes('/')
-              if (!isFullPath && finalPost.image_url !== expectedFilename) {
-                console.warn('[UPLOAD] ⚠️ Filename mismatch (but may be acceptable):')
-                console.warn('  Expected:', expectedFilename)
-                console.warn('  Got:', finalPost.image_url)
-              } else {
-                console.log('[UPLOAD] ✅ Final verification passed - image_url is saved correctly')
-              }
+            } else if (finalPost.image_url !== expectedPath) {
+              console.warn('[UPLOAD] ⚠️ Storage path mismatch (but may be acceptable):')
+              console.warn('  Expected:', expectedPath)
+              console.warn('  Got:', finalPost.image_url)
+              console.warn('  This might be a legacy format - continuing anyway')
             } else {
-              console.log('[UPLOAD] ✅ Final verification passed - image_url matches expected filename')
+              console.log('[UPLOAD] ✅ Final verification passed - image_url matches expected storage path')
             }
           }
         } catch (uploadException: any) {

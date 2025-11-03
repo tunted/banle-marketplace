@@ -4,12 +4,13 @@ import { createClient } from '@/lib/supabase-server'
  * Server-side utility to generate public URLs for post images
  * Use this in Server Components to avoid client-side waterfall
  * 
- * @param postId - The post ID (UUID)
- * @param imageUrl - The filename stored in database (e.g., "image.jpg") or null
+ * Uses the exact image_url value stored in the database without any path manipulation.
+ * 
+ * @param imageUrl - The storage path stored in database (e.g., "{postId}/filename.jpg") or null
  * @returns Public URL string or null if path is invalid
  */
-export async function getPostImageUrlServer(postId: string | null | undefined, imageUrl: string | null | undefined): Promise<string | null> {
-  if (!postId || !imageUrl) return null
+export async function getPostImageUrlServer(imageUrl: string | null | undefined): Promise<string | null> {
+  if (!imageUrl) return null
   
   // If imageUrl is already a full URL, return it
   if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
@@ -21,17 +22,12 @@ export async function getPostImageUrlServer(postId: string | null | undefined, i
     return imageUrl
   }
   
-  // Handle legacy format: "posts/{postId}/filename.jpg" (backward compatibility)
-  // Extract filename if it contains path separators
-  let filename = imageUrl
-  if (imageUrl.includes('/')) {
-    const parts = imageUrl.split('/')
-    filename = parts[parts.length - 1]
+  // Use the stored path directly - getPublicUrl() expects path within bucket
+  // Remove "posts/" prefix if present (getPublicUrl adds bucket name automatically)
+  let storagePath = imageUrl
+  if (storagePath.startsWith('posts/')) {
+    storagePath = storagePath.substring(6) // Remove "posts/" prefix
   }
-  
-  // Reconstruct full storage path: "{postId}/{filename}"
-  // getPublicUrl() expects path within bucket (without "posts/" prefix)
-  const storagePath = `${postId}/${filename}`
   
   // Convert to public URL using Supabase Storage
   try {
@@ -52,7 +48,7 @@ export async function processPostsWithImageUrls<T extends { id: string; image_ur
 ): Promise<(T & { image_url_resolved: string | null })[]> {
   return Promise.all(
     posts.map(async (post) => {
-      const imageUrl = await getPostImageUrlServer(post.id, post.image_url)
+      const imageUrl = await getPostImageUrlServer(post.image_url)
       return {
         ...post,
         image_url_resolved: imageUrl, // null if no image (components will show SVG fallback)

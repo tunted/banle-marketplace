@@ -5,16 +5,15 @@ import Image from 'next/image'
 import { getPostImageUrl } from '@/lib/utils'
 
 interface ImageCarouselProps {
-  images: string[] // Array of public URLs or filenames
+  images: string[] // Array of public URLs or storage paths
   title: string
-  postId?: string // Optional: if provided, filenames will be converted to URLs
 }
 
-export default function ImageCarousel({ images, title, postId }: ImageCarouselProps) {
+export default function ImageCarousel({ images, title }: ImageCarouselProps) {
   const [currentIndex, setCurrentIndex] = useState(0)
 
-  // Convert image paths/filenames to public URLs
-  // Input can be: public URLs (http/https), relative paths (/), or filenames (if postId provided)
+  // Convert image paths to public URLs
+  // Input can be: public URLs (http/https), relative paths (/), or storage paths from database
   const imageUrls = useMemo(() => {
     return images
       .map((img) => {
@@ -30,26 +29,12 @@ export default function ImageCarousel({ images, title, postId }: ImageCarouselPr
           return img
         }
         
-        // If postId is provided and img looks like a filename (no path separators)
-        // Convert filename to public URL using postId
-        if (postId && !img.includes('/')) {
-          return getPostImageUrl(postId, img)
-        }
-        
-        // Legacy format: "posts/{postId}/filename.jpg" - extract filename and reconstruct
-        // This handles backward compatibility
-        if (img.includes('/') && postId) {
-          const parts = img.split('/')
-          const filename = parts[parts.length - 1]
-          return getPostImageUrl(postId, filename)
-        }
-        
-        // Fallback: try to use img as-is (might be a legacy full path)
-        // getPostImageUrl will handle backward compatibility
-        return postId ? getPostImageUrl(postId, img) : null
+        // Otherwise, treat as storage path from database and convert to public URL
+        // Uses the exact path stored in the database without path manipulation
+        return getPostImageUrl(img)
       })
       .filter((url): url is string => url !== null && url !== '')
-  }, [images, postId])
+  }, [images])
 
   const goToPrevious = () => {
     setCurrentIndex((prev) => (prev === 0 ? imageUrls.length - 1 : prev - 1))

@@ -367,10 +367,9 @@ export default function HomePage() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredPosts.map((post, index) => {
-            // Convert image_url filename to public URL
-            // image_url format: "filename.jpg" (just the filename)
-            // getPostImageUrl() reconstructs path as "posts/{postId}/filename.jpg" and generates public URL
-            const imageUrl = getPostImageUrl(post.id, post.image_url)
+            // Convert image_url to public URL
+            // Uses the exact image_url value stored in the database without path manipulation
+            const imageUrl = getPostImageUrl(post.image_url)
 
             const isNew = isNewPost(post.created_at)
             // Add priority to first 6 images (above fold on most screens)

@@ -13,18 +13,16 @@ export function formatCurrency(amount: number): string {
 /**
  * Get public URL from Supabase Storage for posts
  * 
- * This function reconstructs the full storage path and generates a public URL.
+ * Uses the exact image_url value stored in the database without any path manipulation.
  * 
- * Database format: image_url stores only the filename (e.g., "image.jpg")
- * Storage location: posts/{postId}/{filename}
+ * Database format: image_url stores the storage path (e.g., "{postId}/filename.jpg" or "posts/{postId}/filename.jpg")
  * 
- * @param postId - The post ID (UUID)
- * @param imageUrl - The filename stored in database (e.g., "image.jpg") or null
+ * @param imageUrl - The storage path stored in database (e.g., "{postId}/filename.jpg") or null
  * @returns Public URL string or null if path is invalid
  */
-export function getPostImageUrl(postId: string | null | undefined, imageUrl: string | null | undefined): string | null {
+export function getPostImageUrl(imageUrl: string | null | undefined): string | null {
   // Handle null/undefined - return null (components will show SVG fallback)
-  if (!postId || !imageUrl) {
+  if (!imageUrl) {
     return null
   }
   
@@ -38,17 +36,12 @@ export function getPostImageUrl(postId: string | null | undefined, imageUrl: str
     return imageUrl
   }
   
-  // Handle legacy format: "posts/{postId}/filename.jpg" (backward compatibility)
-  // Extract filename if it contains path separators
-  let filename = imageUrl
-  if (imageUrl.includes('/')) {
-    const parts = imageUrl.split('/')
-    filename = parts[parts.length - 1]
+  // Use the stored path directly - getPublicUrl() expects path within bucket
+  // Remove "posts/" prefix if present (getPublicUrl adds bucket name automatically)
+  let storagePath = imageUrl
+  if (storagePath.startsWith('posts/')) {
+    storagePath = storagePath.substring(6) // Remove "posts/" prefix
   }
-  
-  // Reconstruct full storage path: "{postId}/{filename}"
-  // getPublicUrl() expects path within bucket (without "posts/" prefix)
-  const storagePath = `${postId}/${filename}`
   
   // Use getPublicUrl() with the path within the bucket
   try {
