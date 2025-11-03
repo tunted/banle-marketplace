@@ -18,6 +18,13 @@ interface Ward {
   province_code: string
 }
 
+interface Category {
+  id: string
+  name: string
+  slug: string
+  sort_order: number | null
+}
+
 export default function PostPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
@@ -27,6 +34,7 @@ export default function PostPage() {
     phone: '',
     location: '',
     description: '',
+    category: '',
     province_code: '',
     ward_code: '',
   })
@@ -38,9 +46,45 @@ export default function PostPage() {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const [provinces, setProvinces] = useState<Province[]>([])
   const [wards, setWards] = useState<Ward[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
   const [loadingProvinces, setLoadingProvinces] = useState(false)
   const [loadingWards, setLoadingWards] = useState(false)
+  const [loadingCategories, setLoadingCategories] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Load categories on mount
+  useEffect(() => {
+    async function loadCategories() {
+      setLoadingCategories(true)
+      try {
+        const { data, error } = await supabase
+          .from('categories')
+          .select('id, name, slug, sort_order')
+          .order('sort_order', { nullsFirst: false })
+          .order('name')
+
+        if (error) {
+          console.error('Error fetching categories:', error)
+        } else {
+          // Sort categories: first by sort_order (nulls last), then by name
+          const sortedCategories = (data || []).sort((a, b) => {
+            if (a.sort_order !== null && b.sort_order !== null) {
+              return a.sort_order - b.sort_order
+            }
+            if (a.sort_order !== null) return -1
+            if (b.sort_order !== null) return 1
+            return a.name.localeCompare(b.name)
+          })
+          setCategories(sortedCategories)
+        }
+      } catch (err) {
+        console.error('Error loading categories:', err)
+      } finally {
+        setLoadingCategories(false)
+      }
+    }
+    loadCategories()
+  }, [])
 
   // Load provinces on mount
   useEffect(() => {
@@ -121,8 +165,9 @@ export default function PostPage() {
     
     // Validate phone number in real-time
     if (name === 'phone') {
-      if (value && !validatePhoneNumber(value)) {
-        setPhoneError('Số điện thoại không hợp lệ. Ví dụ: 0912345678 hoặc +84912345678')
+      const trimmedValue = value.trim()
+      if (trimmedValue && !validatePhoneNumber(trimmedValue)) {
+        setPhoneError('Số điện thoại không hợp lệ. Ví dụ: 0912345678, 0987654321 hoặc +84912345678')
       } else {
         setPhoneError(null)
       }
@@ -249,10 +294,16 @@ export default function PostPage() {
       if (!formData.price || parseFloat(formData.price) <= 0) {
         errors.price = 'Vui lòng nhập giá hợp lệ'
       }
-      if (!formData.phone) {
+      if (!formData.phone || !formData.phone.trim()) {
         errors.phone = 'Vui lòng nhập số điện thoại'
-      } else if (!validatePhoneNumber(formData.phone)) {
-        errors.phone = 'Số điện thoại không hợp lệ'
+      } else {
+        const trimmedPhone = formData.phone.trim()
+        if (!validatePhoneNumber(trimmedPhone)) {
+          errors.phone = 'Số điện thoại không hợp lệ. Ví dụ: 0912345678, 0987654321 hoặc +84912345678'
+        }
+      }
+      if (!formData.category || !formData.category.trim()) {
+        errors.category = 'Vui lòng chọn danh mục'
       }
       if (!formData.location.trim()) {
         errors.location = 'Vui lòng nhập địa chỉ'
@@ -269,9 +320,10 @@ export default function PostPage() {
         user_id: user.id,
         title: formData.title.trim(),
         price: parseFloat(formData.price),
-        phone: formData.phone,
+        phone: formData.phone.trim(),
         location: formData.location.trim(),
         description: formData.description.trim() || null,
+        category: formData.category.trim(),
         image_url: null, // Will be updated after image upload
         province_code: formData.province_code || null,
         ward_code: formData.ward_code || null,
@@ -357,7 +409,8 @@ export default function PostPage() {
               console.error('Upload error:', uploadError)
               
               // Handle specific errors
-              const statusCode = uploadError.statusCode
+              // Check if statusCode exists (some error types may have it)
+              const statusCode = (uploadError as any).statusCode as number | undefined
               const errorMsg = uploadError.message?.toLowerCase() || ''
               
               if (statusCode === 404 || errorMsg.includes('not found') || errorMsg.includes('bucket')) {
@@ -769,6 +822,38 @@ export default function PostPage() {
             />
             {formErrors.price && (
               <p className="mt-1 text-sm text-red-600">{formErrors.price}</p>
+            )}
+          </div>
+
+          <div>
+            <label htmlFor="category" className="block text-sm font-medium text-gray-700 mb-2">
+              Danh mục <span className="text-red-500">*</span>
+            </label>
+            <select
+              id="category"
+              name="category"
+              required
+              value={formData.category}
+              onChange={handleInputChange}
+              disabled={loadingCategories}
+              className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white ${
+                formErrors.category ? 'border-red-300' : 'border-gray-300'
+              } ${loadingCategories ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              <option value="">
+                {loadingCategories ? 'Đang tải danh mục...' : 'Chọn danh mục'}
+              </option>
+              {categories.map((category) => (
+                <option key={category.id} value={category.slug}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+            {formErrors.category && (
+              <p className="mt-1 text-sm text-red-600">{formErrors.category}</p>
+            )}
+            {!formErrors.category && formData.category && (
+              <p className="mt-1 text-sm text-green-600">✓ Đã chọn danh mục</p>
             )}
           </div>
 

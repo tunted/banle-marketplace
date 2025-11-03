@@ -141,10 +141,32 @@ export function isNewPost(dateString: string): boolean {
 /**
  * Validate Vietnamese phone number format
  * Accepts: 10 digits starting with 0, or 11 digits starting with +84 or 84
+ * 
+ * Valid formats:
+ * - 0912345678 (10 digits, starts with 0)
+ * - 0987654321 (10 digits, starts with 0)
+ * - +84912345678 (11 digits with + prefix)
+ * - 84912345678 (11 digits without +)
+ * 
+ * Valid prefixes: 03, 05, 07, 08, 09 (mobile networks)
  */
 export function validatePhoneNumber(phone: string): boolean {
-  // Remove all whitespace, dashes, and plus signs
-  const cleaned = phone.replace(/\s+/g, '').replace(/[-\+]/g, '')
+  if (!phone || typeof phone !== 'string') {
+    return false
+  }
+  
+  // Remove all whitespace, dashes, and plus signs for validation
+  const cleaned = phone.trim().replace(/\s+/g, '').replace(/[-\+]/g, '')
+  
+  // Check if empty after cleaning
+  if (!cleaned) {
+    return false
+  }
+  
+  // Check if it contains only digits
+  if (!/^\d+$/.test(cleaned)) {
+    return false
+  }
   
   // Vietnamese phone patterns:
   // - 10 digits starting with 0 followed by 3, 5, 7, 8, or 9 (e.g., 0912345678)

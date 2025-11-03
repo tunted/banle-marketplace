@@ -246,7 +246,8 @@ export default function ProfilePage() {
         // Handle upload errors - focus on RLS/permission issues
         let errorMessage = 'Không thể tải ảnh lên. Vui lòng thử lại.'
         
-        const statusCode = uploadError.statusCode
+        // Check if statusCode exists (some error types may have it)
+        const statusCode = (uploadError as any).statusCode as number | undefined
         const errorMsg = uploadError.message?.toLowerCase() || ''
         
         // Handle RLS/permission errors (403 or 400 often indicates RLS issue)
