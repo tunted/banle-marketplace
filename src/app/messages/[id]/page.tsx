@@ -205,42 +205,68 @@ export default function ConversationPage() {
         data: { user },
       } = await supabase.auth.getUser()
 
-      if (!user) return
+      if (!user) {
+        console.warn('[ConversationPage] No user when loading messages')
+        return
+      }
+
+      console.log('[ConversationPage] Loading messages for conversation:', conversationId)
 
       // Fetch messages with sender info
+      // Try simpler query first (without foreign key join) to avoid potential issues
       const { data: messagesData, error: messagesError } = await supabase
         .from('messages')
         .select(`
           id,
           sender_id,
           content,
-          sent_at,
-          sender:user_profiles!messages_sender_id_fkey (
-            id,
-            full_name,
-            avatar_url
-          )
+          sent_at
         `)
         .eq('conversation_id', conversationId)
         .order('sent_at', { ascending: true })
 
       if (messagesError) {
-        console.error('Error loading messages:', messagesError)
+        console.error('[ConversationPage] Error loading messages:', messagesError)
+        console.error('[ConversationPage] Error details:', {
+          code: messagesError.code,
+          message: messagesError.message,
+          details: messagesError.details,
+        })
         return
       }
 
+      if (!messagesData || messagesData.length === 0) {
+        console.log('[ConversationPage] No messages found for conversation:', conversationId)
+        setMessages([])
+        return
+      }
+
+      console.log('[ConversationPage] Loaded', messagesData.length, 'messages')
+
+      // Fetch sender profiles separately if needed
+      const senderIds = [...new Set(messagesData.map((msg: any) => msg.sender_id))]
+      const { data: senderProfiles } = await supabase
+        .from('user_profiles')
+        .select('id, full_name, avatar_url')
+        .in('id', senderIds)
+
+      const profilesMap = new Map(
+        (senderProfiles || []).map((p: any) => [p.id, p])
+      )
+
       // Transform messages
-      const transformedMessages: Message[] = (messagesData || []).map((msg: any) => ({
+      const transformedMessages: Message[] = messagesData.map((msg: any) => ({
         id: msg.id,
         sender_id: msg.sender_id,
         content: msg.content,
         sent_at: msg.sent_at,
-        sender: msg.sender || null,
+        sender: profilesMap.get(msg.sender_id) || null,
       }))
 
       setMessages(transformedMessages)
-    } catch (err) {
-      console.error('Error loading messages:', err)
+    } catch (err: any) {
+      console.error('[ConversationPage] Unexpected error loading messages:', err)
+      alert(`Lỗi khi tải tin nhắn: ${err?.message || 'Vui lòng thử lại.'}`)
     }
   }
 
@@ -286,26 +312,38 @@ export default function ConversationPage() {
         .single()
 
       if (insertError) {
-        console.error('Error sending message:', insertError)
+        console.error('[ConversationPage] Error sending message:', insertError)
+        console.error('[ConversationPage] Error details:', {
+          code: insertError.code,
+          message: insertError.message,
+          details: insertError.details,
+          hint: insertError.hint,
+        })
         // Remove optimistic message on error
         setMessages((prev) => prev.filter((m) => m.id !== tempId))
-        alert('Không thể gửi tin nhắn. Vui lòng thử lại.')
+        alert(`Không thể gửi tin nhắn: ${insertError.message || 'Vui lòng thử lại.'}`)
         setNewMessage(messageContent) // Restore message
-      } else {
+      } else if (insertedMessage) {
+        console.log('[ConversationPage] Message sent successfully:', insertedMessage.id)
         // Replace temp message with real one
-        if (insertedMessage) {
-          setMessages((prev) => {
-            const filtered = prev.filter((m) => m.id !== tempId)
-            return [...filtered, {
-              id: insertedMessage.id,
-              sender_id: insertedMessage.sender_id,
-              content: insertedMessage.content,
-              sent_at: insertedMessage.sent_at,
-              sender: optimisticMessage.sender,
-            }]
-          })
-        }
+        setMessages((prev) => {
+          const filtered = prev.filter((m) => m.id !== tempId)
+          return [...filtered, {
+            id: insertedMessage.id,
+            sender_id: insertedMessage.sender_id,
+            content: insertedMessage.content,
+            sent_at: insertedMessage.sent_at,
+            sender: optimisticMessage.sender,
+          }]
+        })
+        // Reload messages to ensure we have the latest
+        setTimeout(() => loadMessages(), 500)
         inputRef.current?.focus()
+      } else {
+        console.error('[ConversationPage] Message insert returned no data')
+        setMessages((prev) => prev.filter((m) => m.id !== tempId))
+        alert('Không thể gửi tin nhắn. Vui lòng thử lại.')
+        setNewMessage(messageContent)
       }
     } catch (err) {
       console.error('Error sending message:', err)
