@@ -57,17 +57,31 @@ async function getSellerProfile(userId: string): Promise<SellerProfile | null> {
 
 // Generate static params for top posts
 export async function generateStaticParams() {
-  const { data } = await supabase
-    .from('posts')
-    .select('id')
-    .order('created_at', { ascending: false })
-    .limit(50)
+  // Check if environment variables are available
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+    console.warn('Missing Supabase environment variables. Skipping static params generation.')
+    return []
+  }
 
-  if (!data) return []
+  try {
+    const { data, error } = await supabase
+      .from('posts')
+      .select('id')
+      .order('created_at', { ascending: false })
+      .limit(50)
 
-  return data.map((post) => ({
-    id: post.id,
-  }))
+    if (error || !data) {
+      console.warn('Error fetching posts for static params:', error?.message)
+      return []
+    }
+
+    return data.map((post) => ({
+      id: post.id,
+    }))
+  } catch (error) {
+    console.warn('Error generating static params:', error)
+    return []
+  }
 }
 
 // Enable ISR: revalidate every 60 seconds
