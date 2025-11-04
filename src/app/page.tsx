@@ -615,6 +615,10 @@ export default function HomePage() {
             >
               {categories.map((category) => {
                 const isSelected = selectedCategoryId === category.id
+                // Generate public URL from Supabase Storage
+                const imageUrl = category.image_url
+                  ? supabase.storage.from('categories').getPublicUrl(`images/${category.image_url}`).data.publicUrl
+                  : null
                 return (
                   <button
                     key={category.id}
@@ -624,13 +628,18 @@ export default function HomePage() {
                     }`}
                   >
                     <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-xl overflow-hidden bg-gray-200 flex items-center justify-center aspect-square mb-2">
-                      {category.image_url ? (
+                      {imageUrl ? (
                         <Image
-                          src={category.image_url}
+                          src={imageUrl}
                           alt={category.name}
                           width={112}
                           height={112}
                           className="object-cover w-full h-full"
+                          unoptimized={imageUrl.includes('supabase.co/storage')}
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement
+                            target.style.display = 'none'
+                          }}
                         />
                       ) : (
                         <div className="w-full h-full bg-gray-300" />
