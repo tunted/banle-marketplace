@@ -12,6 +12,7 @@ interface Category {
   id: string
   name: string
   image_url: string | null
+  order: number | null
 }
 
 interface Subcategory {
@@ -273,14 +274,33 @@ export default function HomePage() {
       try {
         const { data, error } = await supabase
           .from('categories')
-          .select('id, name, image_url')
-          .order('name')
+          .select('id, name, image_url, order')
 
         if (error) {
           console.error('Error fetching categories:', error)
           setCategories([])
         } else {
-          setCategories(data || [])
+          // Sort categories:
+          // 1. Categories with order NOT NULL, sorted by order ASC
+          // 2. Categories with order NULL, sorted by id as fallback
+          const sortedCategories = (data || []).sort((a, b) => {
+            // If both have order, sort by order
+            if (a.order !== null && b.order !== null) {
+              return a.order - b.order
+            }
+            // If only a has order, it comes first
+            if (a.order !== null && b.order === null) {
+              return -1
+            }
+            // If only b has order, it comes first
+            if (a.order === null && b.order !== null) {
+              return 1
+            }
+            // If both are null, sort by id
+            return a.id.localeCompare(b.id)
+          })
+          
+          setCategories(sortedCategories)
         }
       } catch (err) {
         console.error('Error loading categories:', err)
