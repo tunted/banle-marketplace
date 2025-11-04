@@ -222,7 +222,7 @@ export function useAuth(): AuthState & AuthMethods {
               full_name: metadata?.full_name || null,
               phone: metadata?.phone || null,
             },
-            emailRedirectTo: `${window.location.origin}/login?success=email_verified`,
+            emailRedirectTo: `${window.location.origin}/login`,
           },
         })
 
@@ -231,8 +231,14 @@ export function useAuth(): AuthState & AuthMethods {
           return { error: new Error(error.message) }
         }
 
-        // Create user profile if user was created
-        if (data?.user) {
+        // Check if email confirmation is required
+        // If user has a session immediately, email confirmation is disabled
+        // Otherwise, it's required
+        const requiresEmailConfirmation = !data.session
+
+        // Create user profile only if email confirmation is NOT required
+        // If email confirmation IS required, the profile will be created in /auth/callback after verification
+        if (data?.user && !requiresEmailConfirmation && data.session) {
           try {
             const { error: profileError } = await supabase.from('user_profiles').insert({
               id: data.user.id,
@@ -249,21 +255,17 @@ export function useAuth(): AuthState & AuthMethods {
             console.error('[useAuth] Error creating profile:', profileErr)
             // Continue anyway
           }
+        }
 
-          setState((prev) => ({ ...prev, loading: false }))
+        setState((prev) => ({ ...prev, loading: false }))
 
-          // Check if email confirmation is required
-          // If user has a session immediately, email confirmation is disabled
-          // Otherwise, it's required
-          const requiresEmailConfirmation = !data.session
-
+        if (data?.user) {
           return {
             error: null,
             requiresEmailConfirmation,
           }
         }
 
-        setState((prev) => ({ ...prev, loading: false }))
         return { error: new Error('Sign up failed - no user created') }
       } catch (err) {
         setState((prev) => ({ ...prev, loading: false }))

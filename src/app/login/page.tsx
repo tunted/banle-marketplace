@@ -32,26 +32,89 @@ export default function LoginPage() {
     // Handle email verification callback from hash
     async function handleEmailVerification() {
       try {
-        // Check if URL has hash (email verification callback)
-        if (window.location.hash) {
-          const hashParams = new URLSearchParams(window.location.hash.substring(1))
+        // Check if URL has hash (email verification callback from Supabase)
+        const hash = window.location.hash
+        if (hash) {
+          const hashParams = new URLSearchParams(hash.substring(1)) // Remove '#'
           const accessToken = hashParams.get('access_token')
+          const refreshToken = hashParams.get('refresh_token')
           const type = hashParams.get('type')
+          const error = hashParams.get('error')
+          const errorDescription = hashParams.get('error_description')
 
-          if (type === 'signup' && accessToken) {
-            // User verified their email via hash, Supabase auto-authenticates
-            // Wait a moment for session to be established and useAuth hook to update
-            await new Promise(resolve => setTimeout(resolve, 1000))
-            
-            if (user) {
-              // User is authenticated, show success and redirect
-              setSuccess('Email đã được xác nhận thành công! Đang chuyển hướng...')
-              // Clear hash from URL
-              window.history.replaceState(null, '', window.location.pathname + window.location.search)
-              setTimeout(() => {
+          // Handle errors
+          if (error) {
+            console.error('Email verification error:', error, errorDescription)
+            setError(errorDescription || 'Xác minh email thất bại. Vui lòng thử lại.')
+            // Clear hash from URL
+            window.history.replaceState(null, '', window.location.pathname + window.location.search)
+            return
+          }
+
+          // If we have tokens, exchange them for a session
+          if (accessToken && refreshToken && (type === 'signup' || type === 'email')) {
+            try {
+              const { supabase } = await import('@/lib/supabase')
+              const { data, error: sessionError } = await supabase.auth.setSession({
+                access_token: accessToken,
+                refresh_token: refreshToken,
+              })
+
+              if (sessionError) {
+                console.error('Error setting session:', sessionError)
+                setError('Lỗi xác minh phiên đăng nhập. Vui lòng thử lại.')
+                // Clear hash from URL
+                window.history.replaceState(null, '', window.location.pathname + window.location.search)
+                return
+              }
+
+              if (data?.user) {
+                // User is now verified and authenticated
+                // Get user metadata (full_name, phone) from the user object
+                const userMetadata = data.user.user_metadata || {}
+                const fullName = userMetadata.full_name || null
+                const phone = userMetadata.phone || null
+
+                // Create or update user profile
+                try {
+                  const { error: profileError } = await supabase
+                    .from('user_profiles')
+                    .upsert({
+                      id: data.user.id,
+                      full_name: fullName,
+                      phone: phone,
+                      avatar_url: null,
+                      updated_at: new Date().toISOString(),
+                    }, {
+                      onConflict: 'id',
+                    })
+
+                  if (profileError) {
+                    console.warn('Error creating/updating profile:', profileError)
+                    // Continue anyway - profile might already exist
+                  }
+                } catch (profileErr) {
+                  console.error('Error creating/updating profile:', profileErr)
+                  // Continue anyway
+                }
+
+                // Clear hash from URL
+                window.history.replaceState(null, '', window.location.pathname + window.location.search)
+                
+                // Show success message
+                setSuccess('Email đã được xác nhận thành công! Đang chuyển hướng...')
+                
+                // Wait a moment for state to update, then redirect
+                await new Promise(resolve => setTimeout(resolve, 1500))
                 router.push('/')
                 router.refresh()
-              }, 1500)
+                return
+              }
+            } catch (err) {
+              console.error('Error in email verification:', err)
+              setError('Đã xảy ra lỗi khi xác minh email. Vui lòng thử lại.')
+              // Clear hash from URL
+              window.history.replaceState(null, '', window.location.pathname + window.location.search)
               return
             }
           }
@@ -63,20 +126,29 @@ export default function LoginPage() {
 
     handleEmailVerification()
 
-    // Handle query params
-    const errorParam = searchParams.get('error')
-    const successParam = searchParams.get('success')
+    // Handle query params (only if hash verification wasn't already processed)
+    // Skip if we already handled email verification via hash
+    if (!window.location.hash) {
+      const errorParam = searchParams.get('error')
+      const successParam = searchParams.get('success')
 
-    if (errorParam === 'invalid_reset_link') {
-      setError('Liên kết đặt lại mật khẩu không hợp lệ hoặc đã hết hạn. Vui lòng yêu cầu liên kết mới.')
-    } else if (successParam === 'password_reset') {
-      setSuccess('Mật khẩu của bạn đã được đặt lại thành công! Vui lòng đăng nhập với mật khẩu mới.')
-      // Clear success message after 5 seconds
-      setTimeout(() => setSuccess(null), 5000)
-    } else if (successParam === 'email_verified') {
-      setSuccess('Email đã được xác nhận thành công! Bạn có thể đăng nhập ngay.')
-      // Clear success message after 5 seconds
-      setTimeout(() => setSuccess(null), 5000)
+      if (errorParam === 'invalid_reset_link') {
+        setError('Liên kết đặt lại mật khẩu không hợp lệ hoặc đã hết hạn. Vui lòng yêu cầu liên kết mới.')
+      } else if (errorParam === 'email_verification_failed' || errorParam === 'session_error' || errorParam === 'verification_failed' || errorParam === 'callback_error') {
+        setError('Xác minh email thất bại. Vui lòng thử lại hoặc đăng nhập.')
+      } else if (successParam === 'password_reset') {
+        setSuccess('Mật khẩu của bạn đã được đặt lại thành công! Vui lòng đăng nhập với mật khẩu mới.')
+        // Clear success message after 5 seconds
+        setTimeout(() => setSuccess(null), 5000)
+      } else if (successParam === 'email_verified') {
+        setSuccess('Email đã được xác nhận thành công! Bạn có thể đăng nhập ngay.')
+        // Clear success message after 5 seconds
+        setTimeout(() => setSuccess(null), 5000)
+      } else if (searchParams.get('verified') === 'email_verified_please_login') {
+        setSuccess('Email đã được xác minh. Vui lòng đăng nhập để tiếp tục.')
+        // Clear success message after 5 seconds
+        setTimeout(() => setSuccess(null), 5000)
+      }
     }
   }, [searchParams, router, user])
 
